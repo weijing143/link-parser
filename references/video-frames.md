@@ -17,6 +17,8 @@
 ## 流程
 
 ```
+0. 关闭弹幕          → 点击弹幕开关: browser_click([aria-label="弹幕显示隐藏"])
+                       B站弹幕层（.bpx-player-dm）会覆盖在视频上影响截帧画面
 1. 确认视频就绪    → video.duration > 0 && video.readyState >= 3
 2. 激活渲染管线    → video.play() 等 300ms → video.pause()
 3. 循环截帧        → for t in 1..N:
@@ -73,6 +75,7 @@ async (page, frameCount = 5) => {
 
 ## 注意点
 
+- **关闭弹幕**：B站的弹幕层（`.bpx-player-dm`）覆盖在视频上方，截帧前**必须**先点击弹幕开关。用 `browser_click([aria-label="弹幕显示隐藏"])` 或直接隐藏 DOM：`document.querySelector('.bpx-player-dm').style.display = 'none'`。抖音一般没有弹幕层，可跳过此步。
 - **渲染管线激活**：某些浏览器视频第一帧是黑屏，必须先 `play()` 再 `pause()` 激活解码器，否则截图全黑。
 - **seek 精度**：`currentTime` 设置后需要等 400-600ms，给浏览器解码关键帧的时间。如果截图模糊或位置不对，说明等得不够久。
 - **帧率**：B站/抖音的视频关键帧间隔通常 1-3 秒，`currentTime = N` 会跳到最近的关键帧，可能和预期时间偏差 0-2 秒。这是浏览器实现限制，无法避免。
