@@ -1,6 +1,6 @@
 ---
 name: link-parser
-description: Parse links from Bilibili, Douyin, WeChat Official Account articles, Toutiao/Xigua Video, Zhihu, and generic web pages to extract structured metadata (title, author, publish time, stats), cover/images, body text, and video/audio stream URLs. Use whenever the user shares a link from these platforms and asks to "parse / 解析 / read / extract / 总结 / 看看" it, or wants to save a link's content for later reading. Extracted content is for the assistant and the user's own information review only - respect each platform's terms of service.
+description: Parse links from Bilibili, Douyin, WeChat Official Account articles, Toutiao/Xigua Video, Zhihu, and generic web pages to extract structured metadata (title, author, publish time, stats), cover/images, body text, and video/audio stream URLs. For video platforms (Bilibili/Douyin/Xigua), optionally capture video frame previews at each second when the user explicitly asks to "截帧 / 视频预览 / 逐帧 / 取帧 / 截每一秒". Use whenever the user shares a link from these platforms and asks to "parse / 解析 / read / extract / 总结 / 看看" it.
 ---
 
 # Link Parser
@@ -18,7 +18,12 @@ Parse a shared link from supported Chinese platforms and return a structured, as
 4. Wait for render    → wait_for key element that proves page loaded
 5. Run platform extract → browser_evaluate with the platform's JS extractor
 6. Post-process       → trim/cap body, normalize numbers, drop nulls
-7. Return card        → markdown card in the format below
+7. [Optional] Capture frames → if video platform AND user said 截帧/视频预览/逐帧/取帧:
+   a. Read references/video-frames.md
+   b. Activate video rendering pipeline (play→pause)
+   c. Loop t=1..N: seek to t, wait 500ms, screenshot <video> element
+   d. Append frame previews to card
+8. Return card        → markdown card in the format below
 ```
 
 ### Step 1: Normalize URL
@@ -37,8 +42,11 @@ Match the final URL's hostname against:
 | `toutiao.com` / `ixigua.com` | Toutiao / Xigua | `references/toutiao.md` |
 | `zhihu.com` | Zhihu | `references/zhihu.md` |
 | *(anything else)* | Generic | `references/generic.md` |
+| *(video platforms, optional)* | Video Frame Capture | `references/video-frames.md` |
 
 **Read the matching reference file before extracting.** Each reference contains the platform-specific JS extractor function and the wait condition. Do not invent selectors — always use the documented one.
+
+> 🎬 **Video frame capture** — After parsing a B站/抖音/西瓜 video, if the user explicitly asked to "截帧 / 视频预览 / 逐帧 / 取帧", read `references/video-frames.md` and capture one screenshot per second (default 5 frames) from the `<video>` element. Append the frames to the card as preview images. Do NOT capture frames unless the user explicitly asked — it's resource-intensive.
 
 ### Step 3–4: Open and wait
 
@@ -125,6 +133,19 @@ Use the emoji prefix per platform: 📺 B站 / 🎵 抖音 / 📰 公众号 / �
 
 If the user only asked for a **summary** ("总结一下" / "帮我看看"), return the card **without** the raw body and **without** stream URLs — just the summary fields and a 2-3 sentence abstract the assistant writes from the body.
 
+### Video frame preview (optional)
+
+If the user asked for 截帧/视频预览/逐帧, append this section to the card:
+
+```markdown
+### 🎬 视频预览帧（每秒一帧）
+[第 1 秒](frame_01s.png) [第 2 秒](frame_02s.png) [第 3 秒](frame_03s.png) [第 4 秒](frame_04s.png) [第 5 秒](frame_05s.png)
+```
+
+If more than 5 frames were captured, add: `*截取前 N 秒，全部 N 帧已保存到本地。*`
+
+Note: frame images are saved as PNG files in the working directory. They are NOT uploaded to any external service — the file paths are local references.
+
 ## When to stop and ask
 
 - If `browser_navigate` lands on a login/verification wall (URL contains `passport`, `login`, `captcha`, or the page text matches `/请登录|扫码登录|安全验证/`), **stop** and tell the user: "This page requires login/verification. Please log in to <platform> in the Playwright browser, then ask me to retry." Don't try to bypass.
@@ -141,5 +162,6 @@ If the user only asked for a **summary** ("总结一下" / "帮我看看"), retu
 | Toutiao/Xigua | Medium — DOM + meta |
 | Zhihu | Medium — DOM + `initialData` |
 | Generic | Best-effort OG meta |
+| Video Frames (optional) | Screenshot `<video>` at each second |
 
 Detail lives in `references/<platform>.md`. **Always read the reference before running the extractor** — selectors change, and the reference may have a fresher version than this file.
