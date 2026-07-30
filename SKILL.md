@@ -20,9 +20,12 @@ Parse a shared link from supported Chinese platforms and return a structured, as
 6. Post-process       → trim/cap body, normalize numbers, drop nulls
 7. [Optional] Capture frames → if video platform AND user said 截帧/视频预览/逐帧/取帧:
    a. Read references/video-frames.md
-   b. Activate video rendering pipeline (play→pause)
-   c. Loop t=1..N: seek to t, wait 500ms, screenshot <video> element
-   d. Append frame previews to card
+   b. Close danmaku → activate pipeline → loop seek+screenshot
+   c. Append frame previews to card
+7b. [Optional] Record video → if video platform AND user said 录屏/录像/录N秒:
+   a. Read references/video-record.md
+   b. Close danmaku → captureStream() + MediaRecorder
+   c. Play N seconds → stop → download .webm → note in card
 8. Return card        → markdown card in the format below
 ```
 
@@ -43,10 +46,15 @@ Match the final URL's hostname against:
 | `zhihu.com` | Zhihu | `references/zhihu.md` |
 | *(anything else)* | Generic | `references/generic.md` |
 | *(video platforms, optional)* | Video Frame Capture | `references/video-frames.md` |
+| *(video platforms, optional)* | Video Recording | `references/video-record.md` |
 
 **Read the matching reference file before extracting.** Each reference contains the platform-specific JS extractor function and the wait condition. Do not invent selectors — always use the documented one.
 
-> 🎬 **Video frame capture** — After parsing a B站/抖音/西瓜 video, if the user explicitly asked to "截帧 / 视频预览 / 逐帧 / 取帧", read `references/video-frames.md` and capture one screenshot per second (default 5 frames) from the `<video>` element. Append the frames to the card as preview images. Do NOT capture frames unless the user explicitly asked — it's resource-intensive.
+> 🎬 **Video frame capture** — After parsing a B站/抖音/西瓜 video, if the user explicitly asked to "截帧 / 视频预览 / 逐帧 / 取帧", read `references/video-frames.md` and capture one screenshot per second (default 5 frames) from the `<video>` element.
+> 
+> 🎥 **Video recording** — If the user asked to "录屏 / 录像 / 录 N 秒", read `references/video-record.md` and use `captureStream()` + `MediaRecorder` to record N seconds of the `<video>` element as a `.webm` file. This is different from frame capture — use recording for "录屏", frames for "截帧".
+> 
+> Do NOT capture frames or record unless the user explicitly asked — both are resource-intensive.
 
 ### Step 3–4: Open and wait
 
@@ -146,6 +154,17 @@ If more than 5 frames were captured, add: `*截取前 N 秒，全部 N 帧已保
 
 Note: frame images are saved as PNG files in the working directory. They are NOT uploaded to any external service — the file paths are local references.
 
+### Video recording result (optional)
+
+If the user asked for 录屏/录像/录N秒, append this to the card:
+
+```markdown
+### 🎥 视频录屏（5 秒）
+已保存到 `clip_5s.webm` · 1.5 MB · webm/VP9 格式
+```
+
+The `.webm` file is saved in the Playwright working directory (`.playwright-mcp/` or project root).
+
 ## When to stop and ask
 
 - If `browser_navigate` lands on a login/verification wall (URL contains `passport`, `login`, `captcha`, or the page text matches `/请登录|扫码登录|安全验证/`), **stop** and tell the user: "This page requires login/verification. Please log in to <platform> in the Playwright browser, then ask me to retry." Don't try to bypass.
@@ -163,5 +182,6 @@ Note: frame images are saved as PNG files in the working directory. They are NOT
 | Zhihu | Medium — DOM + `initialData` |
 | Generic | Best-effort OG meta |
 | Video Frames (optional) | Screenshot `<video>` at each second |
+| Video Recording (optional) | `captureStream()` + MediaRecorder → .webm |
 
 Detail lives in `references/<platform>.md`. **Always read the reference before running the extractor** — selectors change, and the reference may have a fresher version than this file.
