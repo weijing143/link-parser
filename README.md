@@ -24,7 +24,10 @@ link-parser/
     ├── wechat.md         # 公众号文章提取器
     ├── toutiao.md        # 头条文章 + 西瓜视频提取器
     ├── zhihu.md          # 知乎问答/专栏/想法提取器
-    └── generic.md        # OG meta 兜底 + 已知限制
+    ├── generic.md        # OG meta 兜底 + 已知限制
+    ├── video-frames.md   # 视频逐秒截帧（可选，需显式触发）
+    ├── video-record.md   # 视频录屏 MediaRecorder（可选，需显式触发）
+    └── test-links.md     # 回归测试链接清单（平台改版后验证用）
 ```
 
 ## 安装

@@ -44,8 +44,8 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
   const authorLink = document.querySelector('a[href*="/user/MS4"]');
   const authorUrl = authorLink?.href || "";
 
-  // 3. 粉丝/获赞 - "粉丝63.3万获赞241.0万" 格式
-  const fansMatch = text.match(/粉丝([\d.]+万)获赞([\d.]+万)/);
+  // 3. 粉丝/获赞 - "粉丝63.3万获赞241.0万" 格式（万? 兼容不带"万"的小数字）
+  const fansMatch = text.match(/粉丝([\d.]+万?)获赞([\d.]+万?)/);
 
   // 4. 统计数字 - 抖音视频页统计区文本模式：
   //    "标题\n点赞数\n评论数\n收藏数\n分享数\n举报\n发布时间：..."
@@ -168,7 +168,7 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
 ## 注意点
 
 - **选择器策略**：抖音前端**经常移除/重命名 `data-e2e` 属性**，class 名也用 CSS Modules 混淆过。本提取器用 `innerText` 正则 + `h1`/`img[alt]` 等稳定锚点，不依赖易变的属性选择器。如果仍提取失败，回退到 generic OG meta 兜底。
-- **统计数字提取的脆弱性**：用"找第一个纯数字 div 的兄弟"策略，假设统计数字总是 4 个连续的纯数字 div。如果抖音改版把统计数字打散或加了图标，可能只拿到部分。这种情况下 `stats` 会有缺失字段，但不会完全失败。
+- **统计数字提取的脆弱性**：策略是"在 `举报` 文本前找 4 个连续纯数字"——方案 A 用精确正则 `数字×4 + 举报`，方案 B 取"举报"前 100 字符内的最后 4 个数字，假设顺序固定为点赞/评论/收藏/分享。如果抖音改版把统计数字打散、加了图标，或改用"1.2万"缩写显示（`\d+` 匹配不到缩写，方案 B 还会把"1.2万"拆成 1 和 2 造成错位），可能只拿到部分字段或顺序错乱。这种情况下 `stats` 会有缺失字段，但不会完全失败。
 - **视频流地址**：抖音的 `<video>.src` 是 `blob:https://...`，不能直接下载。真实 mp4 地址藏在 `RENDER_DATA`（URI 编码的 JSON）或动态接口里，且接口需要 `_signature` 参数。在已登录浏览器里 `RENDER_DATA` 有时能直接拿到 `play_addr.url_list[0]`，但经常被加密。本 skill 在拿不到时返回空 `media` 数组，并在 `extra.note` 里说明原因。
 - **iesdouyin.com 分享页**结构更老更稳定，如果遇到 `www.iesdouyin.com/share/video/`，DOM 更简单（`.video-info`、`.author` 等），但用户量少。
 - **登录墙**：如果 navigate 后 URL 含 `/login` 或页面显示"扫码登录"，按 SKILL.md 的 "When to stop and ask" 处理。注意：抖音视频页**未登录也能看内容**，但评论区会显示"请先登录后发表评论"--这不影响提取，提取的是视频本身的数据。

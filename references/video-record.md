@@ -57,10 +57,14 @@ async (page, duration = 5) => {
     if (video.readyState < 3) return { error: '视频未缓冲就绪', readyState: video.readyState };
 
     const stream = video.captureStream();
-    // VP9 编码的 webm，兼容性好
-    const mediaRecorder = new MediaRecorder(stream, {
-      mimeType: 'video/webm;codecs=vp9'
-    });
+    // VP9 优先，不支持时逐级降级（部分浏览器/系统无 VP9 编码器）
+    let mimeType = 'video/webm;codecs=vp9';
+    if (typeof MediaRecorder.isTypeSupported === 'function' && !MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = MediaRecorder.isTypeSupported('video/webm') ? 'video/webm' : '';
+    }
+    const mediaRecorder = mimeType
+      ? new MediaRecorder(stream, { mimeType })
+      : new MediaRecorder(stream); // 让浏览器自选默认格式
     const chunks = [];
 
     return new Promise((resolve) => {
@@ -69,16 +73,18 @@ async (page, duration = 5) => {
       };
 
       mediaRecorder.onstop = () => {
-        const blob = new Blob(chunks, { type: 'video/webm' });
+        const blob = new Blob(chunks, { type: mediaRecorder.mimeType || 'video/webm' });
         const url = URL.createObjectURL(blob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = `clip_${dur}s.webm`;
+        // 文件名带时间戳，避免短时间内多次录屏互相覆盖
+        const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14); // yyyyMMddHHmmss
+        a.download = `clip_${dur}s_${stamp}.webm`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         URL.revokeObjectURL(url);
-        resolve({ done: true, size: blob.size, duration: dur });
+        resolve({ done: true, size: blob.size, duration: dur, mimeType: mediaRecorder.mimeType });
       };
 
       // 开始录制
@@ -111,7 +117,7 @@ async (page, duration = 5) => {
 
 - **关闭弹幕**：B站的弹幕层（`.bpx-player-dm`）会覆盖在视频上，录屏前**必须**先关闭。用 `browser_click([aria-label="弹幕显示隐藏"])` 或 `el.style.display = 'none'`。
 - **无声录制**：`captureStream()` 默认不包含音频轨道。如需音频，加 `video.captureStream()` 前确保视频不静音。B站/抖音的 `<video>` 元素可能有独立的音频源，录屏时通常无音轨，这是正常现象。
-- **编码格式**：`video/webm;codecs=vp9` 在 Chrome/Edge 中支持良好。如果报 `NotSupportedError`，降级为 `video/webm`（不指定 codec）。
+- **编码格式**：优先 `video/webm;codecs=vp9`。代码里已用 `MediaRecorder.isTypeSupported()` 做逐级降级：VP9 不支持 → `video/webm` → 浏览器默认格式，不会再抛 `NotSupportedError`。返回值里带实际使用的 `mimeType`，卡片里按它标注格式。
 - **分辨率**：录制分辨率和 `<video>` 元素的分辨率一致（B站通常 1080p）。画质取决于原始视频源，无法通过此方式提升。
-- **文件位置**：文件通过浏览器下载到 Playwright 工作目录（`.playwright-mcp/` 或项目根目录），命名 `clip_5s.webm`。如果短时间内多次录屏，后一次会覆盖前一次。
+- **文件位置**：文件通过浏览器下载到 Playwright 工作目录（`.playwright-mcp/` 或项目根目录），命名 `clip_{N}s_yyyyMMddHHmmss.webm`（带时间戳，多次录屏不会互相覆盖）。
 - **与截帧的区别**：截帧适合静态预览（PNG 序列），录屏适合动态展示（单个 webm）。根据用户用词选择对应功能——说"截帧/截图/逐帧"走 video-frames.md，说"录屏/录像/录 N 秒"走本文件。

@@ -54,12 +54,16 @@ async (page, frameCount = 5) => {
   const actualCount = Math.min(frameCount, Math.floor(state.duration));
   const frames = [];
 
+  // 每次截帧用独立时间戳目录，避免多次解析互相覆盖
+  const stamp = new Date().toISOString().replace(/[-:T]/g, '').slice(0, 14); // yyyyMMddHHmmss
+  const dir = `frames_${stamp}`;
+
   // 3. 逐秒截帧
   for (let t = 1; t <= actualCount; t++) {
     await video.evaluate((el, time) => { el.currentTime = time; }, t);
     await page.waitForTimeout(500);
 
-    const filename = `frame_${String(t).padStart(2, '0')}s.png`;
+    const filename = `${dir}/frame_${String(t).padStart(2, '0')}s.png`;
     await video.screenshot({ path: filename, type: 'png' });
     frames.push({ time: t, file: filename });
   }
@@ -68,6 +72,7 @@ async (page, frameCount = 5) => {
     videoSize: `${state.videoWidth}x${state.videoHeight}`,
     duration: state.duration,
     frameCount: frames.length,
+    dir,
     frames,
   };
 }
@@ -80,5 +85,5 @@ async (page, frameCount = 5) => {
 - **seek 精度**：`currentTime` 设置后需要等 400-600ms，给浏览器解码关键帧的时间。如果截图模糊或位置不对，说明等得不够久。
 - **帧率**：B站/抖音的视频关键帧间隔通常 1-3 秒，`currentTime = N` 会跳到最近的关键帧，可能和预期时间偏差 0-2 秒。这是浏览器实现限制，无法避免。
 - **blob URL**：B站/抖音的 `<video>.src` 是 blob URL，只能在当前浏览器会话里用。截图只能保存到本地文件，不能拿到 mp4 直链。
-- **文件位置**：截图保存在 Playwright 的工作目录（通常是项目根目录），文件名 `frame_01s.png` ~ `frame_0Ns.png`。
+- **文件位置**：截图保存在 Playwright 工作目录下的独立子目录 `frames_yyyyMMddHHmmss/`（每次截帧新建一个，避免后一次解析覆盖前一次的帧图），目录内文件名 `frame_01s.png` ~ `frame_0Ns.png`。
 - **卡片展示**：截帧后，在解析卡片末尾追加"视频预览帧"区域，最多展示 5 帧。超过 5 帧时标注"截取前 N 秒，共 N 帧，已保存到本地"。

@@ -1,6 +1,6 @@
 ---
 name: link-parser
-description: Parse links from Bilibili, Douyin, WeChat Official Account articles, Toutiao/Xigua Video, Zhihu, and generic web pages to extract structured metadata (title, author, publish time, stats), cover/images, body text, and video/audio stream URLs. For video platforms (Bilibili/Douyin/Xigua), optionally capture video frame previews at each second when the user explicitly asks to "截帧 / 视频预览 / 逐帧 / 取帧 / 截每一秒". Use whenever the user shares a link from these platforms and asks to "parse / 解析 / read / extract / 总结 / 看看" it.
+description: Parse links from Bilibili, Douyin, WeChat OA articles, Toutiao/Xigua, Zhihu, and generic web pages — extract metadata, cover, body text, and media URLs. Use when the user shares a link and asks to 解析/总结/看看. Optional video frame capture (截帧) or recording (录屏) on explicit request only.
 ---
 
 # Link Parser
@@ -18,7 +18,7 @@ Parse a shared link from supported Chinese platforms and return a structured, as
 4. Wait for render    → wait_for key element that proves page loaded
 5. Run platform extract → browser_evaluate with the platform's JS extractor
 6. Post-process       → trim/cap body, normalize numbers, drop nulls
-7. [Optional] Capture frames → if video platform AND user said 截帧/视频预览/逐帧/取帧:
+7a. [Optional] Capture frames → if video platform AND user said 截帧/视频预览/逐帧/取帧:
    a. Read references/video-frames.md
    b. Close danmaku → activate pipeline → loop seek+screenshot
    c. Append frame previews to card
@@ -98,13 +98,28 @@ type ParseResult = {
 };
 ```
 
+Extraction failure uses a **consistent error shape** instead of throwing — every extractor (platform or generic) must return this on failure so the router can decide retry/fallback without guessing:
+
+```ts
+type ErrorResult = {
+  platform: string;
+  url: string;
+  error: string;                 // machine-readable code, e.g. "AUTO_PLAY_SWITCHED" | "LOGIN_WALL" | "NO_STATE"
+  message?: string;              // human-readable explanation (Chinese ok)
+  partial?: Partial<ParseResult>; // any fields salvaged before failure — still show them in the card
+  extractedAt: string;
+};
+```
+
+Rule of thumb: check `result.error` first. If present → follow the error-specific handling (retry once for `AUTO_PLAY_SWITCHED`, ask user for `LOGIN_WALL`, generic fallback otherwise). Never invent selectors to recover — fall back to generic.
+
 Run it with:
 
 ```js
 await browser_evaluate({ function: "<the extractor function body>" });
 ```
 
-If the extractor throws (page structure changed, login wall, anti-bot), fall back to the **generic** extractor — it relies on OpenGraph / meta tags and works on most pages that set them.
+If the extractor throws or returns an `error` field (page structure changed, login wall, anti-bot), fall back to the **generic** extractor — it relies on OpenGraph / meta tags and works on most pages that set them.
 
 ### Step 6: Post-process
 
@@ -114,7 +129,7 @@ Before returning:
 - **Normalize numbers** — convert `"1.2万播放"` → `"1.2万"` (keep human-readable).
 - **Don't include raw stream URLs** in the user-facing card unless the user explicitly asked for download. Stream URLs are large, expire fast, and clutter the card — keep them only in the raw result for the assistant.
 
-### Step 7: Return card
+### Step 8: Return card
 
 Output a markdown card. Example shape:
 
@@ -147,12 +162,12 @@ If the user asked for 截帧/视频预览/逐帧, append this section to the car
 
 ```markdown
 ### 🎬 视频预览帧（每秒一帧）
-[第 1 秒](frame_01s.png) [第 2 秒](frame_02s.png) [第 3 秒](frame_03s.png) [第 4 秒](frame_04s.png) [第 5 秒](frame_05s.png)
+[第 1 秒](frames_20261007131005/frame_01s.png) [第 2 秒](frames_20261007131005/frame_02s.png) [第 3 秒](frames_20261007131005/frame_03s.png) [第 4 秒](frames_20261007131005/frame_04s.png) [第 5 秒](frames_20261007131005/frame_05s.png)
 ```
 
 If more than 5 frames were captured, add: `*截取前 N 秒，全部 N 帧已保存到本地。*`
 
-Note: frame images are saved as PNG files in the working directory. They are NOT uploaded to any external service — the file paths are local references.
+Note: frame images are saved as PNG files in a per-run subfolder `frames_yyyyMMddHHmmss/` under the working directory (so consecutive parses never overwrite each other). They are NOT uploaded to any external service — the file paths are local references.
 
 ### Video recording result (optional)
 
@@ -160,10 +175,10 @@ If the user asked for 录屏/录像/录N秒, append this to the card:
 
 ```markdown
 ### 🎥 视频录屏（5 秒）
-已保存到 `clip_5s.webm` · 1.5 MB · webm/VP9 格式
+已保存到 `clip_5s_20261007131005.webm` · 1.5 MB · webm/VP9 格式
 ```
 
-The `.webm` file is saved in the Playwright working directory (`.playwright-mcp/` or project root).
+The `.webm` file is saved in the Playwright working directory (`.playwright-mcp/` or project root), named `clip_{N}s_yyyyMMddHHmmss.webm` — the timestamp prevents overwrites across runs. Use the actual `mimeType` returned by the recorder in the card (VP9 may fall back to plain webm).
 
 ## When to stop and ask
 

@@ -207,5 +207,4 @@ await browser_wait_for({ time: 3 });
   const q = d.initialState?.entities?.questions?.[qid];
   const answers = d.initialState?.entities?.answers || {};
   ```
-- **多条答案**：`/question/{qid}` 不带 `/answer/` 时是问题页，含多条答案。本 skill 默认只提取第一条（通常是最高赞）。如果用户想看所有答案，可以让 SKILL.md 提示"该页含 N 条答案，默认取首条，如需更多请说明"。
 - **专栏图片**：专栏文章的图片常带 `data-original` 原图地址（防盗链），如果 `img.src` 是缩略图，可读 `data-original`。
