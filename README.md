@@ -1,6 +1,6 @@
 # link-parser
 
-ZCode skill：解析主流中文平台链接，提取结构化内容。
+AI 编码助手 skill：解析主流中文平台链接，提取结构化内容。兼容 SKILL.md 规范的助手均可使用（如 Kimi Code），不局限于单一平台。
 
 ## 支持平台
 
@@ -60,14 +60,14 @@ node fixtures.mjs                     # 离线 fixture 断言（含 bug 回归�
 
 ## 安装
 
-将 `link-parser/` 目录放到 ZCode 的 skills 路径下：
+将 `link-parser/` 目录放到任意兼容 SKILL.md 规范的编码助手的 skills 路径下：
 
 - 项目级：`<project>/.agents/skills/link-parser/`
 - 用户级：`~/.agents/skills/link-parser/`
 
 ## 使用
 
-在 ZCode 对话中直接发送链接，skill 自动触发。或手动加载：
+在编码助手对话中直接发送链接，skill 自动触发。或手动加载：
 
 ```
 /skill link-parser <链接>
