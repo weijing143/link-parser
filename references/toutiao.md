@@ -27,18 +27,22 @@ await browser_wait_for({ time: 3 });
     || document.querySelector("article .title")?.textContent?.trim()
     || document.title;
 
-  // 作者 - 正文第一行常是"XX记者 XXX"，优先从 innerText 正则提取
-  // 头条的 DOM 选择器不稳定，class 常变
   const text = document.body.innerText;
+
+  // 作者 - 优先取作者主页链接的文本（最可靠）；innerText 正则和 class 选择器兜底
+  // 注意：innerText 正则不能直接用——页面"作者"标签旁紧跟"关注"按钮，
+  //       会误捕"关注"当作者名
+  const authorLinkEl = document.querySelector("a[href*='/user/']");
+  const authorFromLink = authorLinkEl?.textContent?.trim();
   const authorMatch = text.match(/(?:记者|作者|编辑)\s+(\S{1,6})/);
   const author =
-    (authorMatch ? authorMatch[1] : undefined)
+    (authorFromLink && !/^(关注|粉丝)$/.test(authorFromLink) ? authorFromLink : undefined)
+    || (authorMatch && !/^(关注|粉丝)$/.test(authorMatch[1]) ? authorMatch[1] : undefined)
     || document.querySelector(".article-author-name")?.textContent?.trim()
     || document.querySelector("[data-log-name='author']")?.textContent?.trim()
     || document.querySelector(".author-name")?.textContent?.trim();
 
-  const authorUrl =
-    document.querySelector("a[href*='/user/']")?.href || "";
+  const authorUrl = authorLinkEl?.href || "";
 
   // 发布时间 - innerText 正则优先（头条 DOM 选择器不稳定）
   const timeMatch = text.match(/(\d{4}-\d{2}-\d{2}\s*\d{2}:\d{2})/);
@@ -152,6 +156,7 @@ await browser_wait_for({ time: 3 });
 
 ## 注意点
 
+- **作者提取**：优先取 `a[href*='/user/']` 的文本作为作者名；`(?:记者|作者|编辑)\s+(\S{1,6})` innerText 正则仅作兜底，且需排除"关注/粉丝"等按钮词——真实页面"作者"标签旁紧跟"关注"按钮，正则会误捕。
 - **域名判断**：URL 含 `ixigua.com` 走视频提取器，含 `toutiao.com/article` 走文章提取器。如果含 `/video/` 也走视频提取器。
 - **移动版 vs PC 版**：移动版（`m.toutiao.com` / `m.ixigua.com`）DOM 更简单更稳定，如果 PC 版提取失败，可以尝试替换 URL 加 `m.` 前缀重试。
 - **视频流地址**：西瓜视频流地址在 `_SSR_DATA_` 里相对抖音容易拿，但同样可能需要签名。blob URL 不返回。

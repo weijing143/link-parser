@@ -30,6 +30,20 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
 () => {
   const text = document.body.innerText;
 
+  // 0. 前置守卫：视频不存在 / 页面未渲染视频信息时直接返回 ErrorResult，
+  //    避免拿页脚备案号等噪声当数据
+  const h1El = document.querySelector('h1');
+  if (/你要观看的视频不存在|视频不存在/.test(text)
+    || (!h1El && /^在抖音记录美好生活/.test(document.title.replace(/ - 抖音$/, "")))) {
+    return {
+      platform: 'douyin',
+      url: location.href,
+      error: 'VIDEO_NOT_FOUND',
+      message: '视频不存在、已删除，或页面未渲染出视频信息。',
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   // 1. 标题 - h1 最可靠，document.title 兜底
   const h1 = document.querySelector('h1');
   const title = h1?.textContent?.trim() || document.title.replace(/ - 抖音$/, "");
@@ -47,27 +61,40 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
   // 3. 粉丝/获赞 - "粉丝63.3万获赞241.0万" 格式（万? 兼容不带"万"的小数字）
   const fansMatch = text.match(/粉丝([\d.]+万?)获赞([\d.]+万?)/);
 
-  // 4. 统计数字 - 抖音视频页统计区文本模式：
-  //    "标题\n点赞数\n评论数\n收藏数\n分享数\n举报\n发布时间：..."
-  //    4 个连续数字紧挨在"举报"之前、"发布时间"之后的位置
-  //    策略：用正则匹配"标题后紧跟 4 个连续数字再到举报"的模式
-  let statsNums = [];
-  // 方案 A：匹配 "数字\n数字\n数字\n数字\n举报" 模式（最稳定）
-  const statsMatch = text.match(/(\d+)\s*\n\s*(\d+)\s*\n\s*(\d+)\s*\n\s*(\d+)\s*\n\s*举报/);
-  if (statsMatch) {
-    statsNums = [statsMatch[1], statsMatch[2], statsMatch[3], statsMatch[4]];
-  } else {
-    // 方案 B：找"举报"前的连续数字组
-    const reportIdx = text.indexOf('举报');
-    if (reportIdx > 0) {
-      const before = text.slice(Math.max(0, reportIdx - 100), reportIdx);
-      const nums = before.match(/\d+/g);
-      if (nums && nums.length >= 4) {
-        statsNums = nums.slice(-4);
+  // 4. 统计数字 - 只在"视频信息区"内取数，绝不抓页脚备案号：
+  //    信息区 = "发布时间"之前的文本（页脚备案号都在发布时间之后，天然排除）；
+  //    信息区文本模式："标题\n点赞数\n评论数\n收藏数\n分享数\n举报\n发布时间：..."
+  //    注：评论/收藏/分享为 0 时抖音不渲染数字（只显示"抢首评/收藏/分享"），取不到留空
+  let likes, comments, collects, shares;
+  const numLine = /^\d[\d.]*万?$/;
+  const timeIdx = text.indexOf('发布时间');
+  const reportIdx = timeIdx > 0 ? text.lastIndexOf('举报', timeIdx) : -1;
+  if (reportIdx > 0) {
+    const before = text.slice(Math.max(0, reportIdx - 150), reportIdx);
+    // 方案 A：四个连续纯数字行（最稳定）
+    const statsMatch = before.match(/(\d+)\s*\n\s*(\d+)\s*\n\s*(\d+)\s*\n\s*(\d+)\s*\n?\s*$/);
+    if (statsMatch) {
+      [likes, comments, collects, shares] = [statsMatch[1], statsMatch[2], statsMatch[3], statsMatch[4]];
+    } else {
+      // 方案 B：按行逐字段取数
+      //   点赞数 = 第一个按钮标签（抢首评/评论）前相邻的纯数字行
+      //   评论数 = "N 条评论" 内嵌数字（"抢首评" 表示 0，留空）
+      //   收藏/分享数 = 按钮标签行内数字，未渲染则留空
+      const lines = before.split('\n').map(l => l.trim()).filter(Boolean);
+      const firstBtnIdx = lines.findIndex(l => /^(抢首评|评论|\d+\s*条评论)/.test(l));
+      if (firstBtnIdx > 0 && numLine.test(lines[firstBtnIdx - 1])) {
+        likes = lines[firstBtnIdx - 1];
       }
+      const findNum = (re) => {
+        const l = lines.find(l => re.test(l));
+        const m = l?.match(/(\d[\d.]*万?)/);
+        return m ? m[1] : undefined;
+      };
+      comments = findNum(/条评论/) || undefined;
+      collects = findNum(/^\s*收藏\s*[\d.]/) || undefined;
+      shares = findNum(/^\s*分享\s*[\d.]/) || undefined;
     }
   }
-  const [likes, comments, collects, shares] = statsNums;
 
   // 5. 发布时间 - "发布时间：2026-07-29 17:56" 格式
   const timeMatch = text.match(/发布时间[：:]\s*([\d\-]+ [\d:]+)/);
@@ -168,7 +195,8 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
 ## 注意点
 
 - **选择器策略**：抖音前端**经常移除/重命名 `data-e2e` 属性**，class 名也用 CSS Modules 混淆过。本提取器用 `innerText` 正则 + `h1`/`img[alt]` 等稳定锚点，不依赖易变的属性选择器。如果仍提取失败，回退到 generic OG meta 兜底。
-- **统计数字提取的脆弱性**：策略是"在 `举报` 文本前找 4 个连续纯数字"——方案 A 用精确正则 `数字×4 + 举报`，方案 B 取"举报"前 100 字符内的最后 4 个数字，假设顺序固定为点赞/评论/收藏/分享。如果抖音改版把统计数字打散、加了图标，或改用"1.2万"缩写显示（`\d+` 匹配不到缩写，方案 B 还会把"1.2万"拆成 1 和 2 造成错位），可能只拿到部分字段或顺序错乱。这种情况下 `stats` 会有缺失字段，但不会完全失败。
+- **统计数字提取的脆弱性**：只在"视频信息区"（`发布时间` 之前的文本）内取数，页脚备案号等噪声天然排除。方案 A 匹配四个连续纯数字行；方案 B 按行逐字段取数——点赞数取"抢首评/评论"按钮前相邻的纯数字行，评论数取"N 条评论"内嵌数字。如果抖音改版把统计数字打散、加了图标，或改用"1.2万"缩写显示，可能只拿到部分字段或顺序错乱，取不到的字段留空（undefined），但不会塞无关数字。评论/收藏/分享为 0 时抖音前端不渲染数字（只显示"抢首评/收藏/分享"），这些字段留空属正常。
+- **视频不存在的前置守卫**：视频删除/失效时页面显示"你要观看的视频不存在"（h1 缺失、标题为站点默认标题），提取器入口直接返回 `error: "VIDEO_NOT_FOUND"` 的 ErrorResult，不再继续提取。
 - **视频流地址**：抖音的 `<video>.src` 是 `blob:https://...`，不能直接下载。真实 mp4 地址藏在 `RENDER_DATA`（URI 编码的 JSON）或动态接口里，且接口需要 `_signature` 参数。在已登录浏览器里 `RENDER_DATA` 有时能直接拿到 `play_addr.url_list[0]`，但经常被加密。本 skill 在拿不到时返回空 `media` 数组，并在 `extra.note` 里说明原因。
 - **iesdouyin.com 分享页**结构更老更稳定，如果遇到 `www.iesdouyin.com/share/video/`，DOM 更简单（`.video-info`、`.author` 等），但用户量少。
 - **登录墙**：如果 navigate 后 URL 含 `/login` 或页面显示"扫码登录"，按 SKILL.md 的 "When to stop and ask" 处理。注意：抖音视频页**未登录也能看内容**，但评论区会显示"请先登录后发表评论"--这不影响提取，提取的是视频本身的数据。

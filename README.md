@@ -18,6 +18,7 @@ ZCode skill：解析主流中文平台链接，提取结构化内容。
 ```
 link-parser/
 ├── SKILL.md              # 主流程：路由 + 输出格式 + 中止条件
+├── test-harness/         # 自动化回归测试（Playwright，可选）
 └── references/
     ├── bilibili.md       # B站视频/专栏提取器
     ├── douyin.md         # 抖音视频提取器
@@ -29,6 +30,26 @@ link-parser/
     ├── video-record.md   # 视频录屏 MediaRecorder（可选，需显式触发）
     └── test-links.md     # 回归测试链接清单（平台改版后验证用）
 ```
+
+## 回归测试
+
+`test-harness/` 提供基于 Playwright 的提取器回归测试，修改任何提取器后建议跑一遍：
+
+```bash
+cd test-harness
+npm install               # 首次；playwright@1.64
+npx playwright install chromium   # 首次下载浏览器
+node run-tests.mjs                    # 全部 6 平台实测（真实页面）
+node run-tests.mjs douyin             # 单平台
+node fixtures.mjs                     # 离线 fixture 断言（含 bug 回归保护）
+```
+
+说明：
+
+- `run-tests.mjs` 用真实页面跑 `references/` 里的提取器，结果写到 `results/*.json`；B站/知乎等被 WAF 拦截时可换 `BROWSER=chrome` 用本机 Chrome 复跑。
+- `fixtures.mjs` 不依赖外网，用构造 DOM 验证提取器逻辑（bilibili 字段映射 / 知乎统计清洗 / 抖音 stats 与 VIDEO_NOT_FOUND / 头条 author），任一条断言失败会以非零码退出。
+- 抖音无稳定公开深链，`run-tests.mjs` 默认从首页推荐流发现链接，也可用 `DOUYIN_URL=https://www.douyin.com/video/xxx` 指定。
+- 实测属于"解析单条公开页面"，请勿用于批量采集。
 
 ## 安装
 
