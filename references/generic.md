@@ -96,6 +96,17 @@ await browser_wait_for({ time: 2 });
   const videoSrc = document.querySelector("video")?.src || "";
   const videoPoster = document.querySelector("video")?.poster || "";
 
+  // 前置守卫：title 与 body 都为空 -> EMPTY（纯 SPA 未渲染/空页面，如实上报）
+  if (!title && !body) {
+    return {
+      platform: "generic",
+      url: location.href,
+      error: "EMPTY",
+      message: "未提取到任何内容（无 OG meta、无正文），页面可能是纯 SPA 未渲染或已失效。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   return {
     platform: "generic",
     url: location.href,
@@ -128,3 +139,4 @@ await browser_wait_for({ time: 2 });
 - **已知硬限制：纯 SPA 无 SSR**：部分站点（如 MSN、Medium 部分文章）的 HTML 源码中**不包含任何文章内容**，只有 `<script>` 标签加载 JS bundle。所有基于 fetch 的工具（fetch_markdown、fetch_readable、WebFetch 等）只能拿到空壳。如果 fetch 类工具全部失败且返回内容 <500 字符或以 JS 代码为主，放弃并告知用户。
 - **付费墙/登录墙**：如果 body 为空或只有"请登录后查看"类文本，按 SKILL.md 的 "When to stop and ask" 处理，不要尝试绕过。
 - **作为兜底**：当被作为已知平台提取器的 fallback 调用时，至少能拿到标题、描述、封面三件套，对用户来说也是有用信息。
+- **前置守卫（ErrorResult）**：best-effort 语义不变——有 OG meta 就正常返回；仅当 title 与 body 同时为空（纯 SPA 未渲染、空页面）时返回 `error: "EMPTY"`，如实上报而不是给一张全空卡片。

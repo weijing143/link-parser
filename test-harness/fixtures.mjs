@@ -226,6 +226,52 @@ async function main() {
   results.zhihu_fixture_pin_no_content = await page.evaluate(`(${zhihuPinSrc})()`);
   check("zhihu: NO_CONTENT (pin)", results.zhihu_fixture_pin_no_content.error === "NO_CONTENT", JSON.stringify(results.zhihu_fixture_pin_no_content));
 
+  // ---------- Batch 3: adversarial-fix regression guards ----------
+  // CRITICAL (defect 1): valid __INITIAL_STATE__.videoData + "请登录后发表评论"
+  // in page text must still be a normal ParseResult, NOT WALL.
+  await load(`<!DOCTYPE html><html><head><title>正常视频 - bilibili</title></head><body>
+    <div class="comment-box">请登录后发表评论</div>
+    <video src="blob:https://www.bilibili.com/x"></video>
+    <script>window.__INITIAL_STATE__ = ${JSON.stringify(biliState)};</script>
+  </body></html>`);
+  results.bilibili_fixture_login_text = await page.evaluate(`(${biliSrc})("BV1TEST00000001")`);
+  const bl = results.bilibili_fixture_login_text;
+  check("bilibili: 请登录评论文本不误杀（无 error）", !bl.error, JSON.stringify(bl.error));
+  check("bilibili: 请登录评论文本不误杀（title 正常）", bl.title === "测试视频标题 Fixture Video", bl.title);
+
+  // Douyin: unhydrated valid page (has h1, no stats yet) must NOT be VIDEO_NOT_FOUND
+  await load(`<!DOCTYPE html><html><head><title>#ootd穿搭 #扭一扭 - 抖音</title></head><body>
+    <h1>#ootd穿搭 #扭一扭</h1>
+    <video src="blob:https://www.douyin.com/x"></video>
+    <img alt="慕禾百货店" src="avatar">
+  </body></html>`);
+  const douyinSrc3 = getExtractorSource("douyin");
+  results.douyin_fixture_unhydrated = await page.evaluate(`(${douyinSrc3})()`);
+  check("douyin: unhydrated page not VIDEO_NOT_FOUND", !results.douyin_fixture_unhydrated.error, JSON.stringify(results.douyin_fixture_unhydrated.error));
+
+  // Douyin: empty title + no anchors -> VIDEO_NOT_FOUND (no empty-shell leak)
+  await load(`<!DOCTYPE html><html><head><title></title></head><body><div class="placeholder"></div></body></html>`);
+  results.douyin_fixture_empty_shell = await page.evaluate(`(${douyinSrc3})()`);
+  check("douyin: empty title + no anchors -> VIDEO_NOT_FOUND", results.douyin_fixture_empty_shell.error === "VIDEO_NOT_FOUND", JSON.stringify(results.douyin_fixture_empty_shell));
+
+  // Toutiao: no article container at all -> NO_CONTENT (and must not throw)
+  await load(`<!DOCTYPE html><html><head><title>出错啦 - 今日头条</title></head><body><p>内容不存在</p></body></html>`);
+  const toutiaoSrc3 = getExtractorSource("toutiao");
+  results.toutiao_fixture_no_content = await page.evaluate(`(${toutiaoSrc3})()`);
+  check("toutiao: no article container -> NO_CONTENT", results.toutiao_fixture_no_content.error === "NO_CONTENT", JSON.stringify(results.toutiao_fixture_no_content));
+
+  // WeChat: deleted content -> DELETED
+  await load(`<!DOCTYPE html><html><head><title>微信公众平台</title></head><body><p>该内容已被发布者删除</p></body></html>`);
+  const wechatSrc3 = getExtractorSource("wechat");
+  results.wechat_fixture_deleted = await page.evaluate(`(${wechatSrc3})()`);
+  check("wechat: deleted content -> DELETED", results.wechat_fixture_deleted.error === "DELETED", JSON.stringify(results.wechat_fixture_deleted));
+
+  // Generic: totally empty page -> EMPTY
+  await load(`<!DOCTYPE html><html><head><title></title></head><body></body></html>`);
+  const genericSrc3 = getExtractorSource("generic");
+  results.generic_fixture_empty = await page.evaluate(`(${genericSrc3})()`);
+  check("generic: empty page -> EMPTY", results.generic_fixture_empty.error === "EMPTY", JSON.stringify(results.generic_fixture_empty));
+
   await browser.close();
 
   writeFileSync(path.join(OUT_DIR, "fixtures.json"), JSON.stringify(results, null, 2));

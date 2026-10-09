@@ -23,26 +23,28 @@ const CASES = [
   { name: "bilibili-not-found", url: "https://www.bilibili.com/video/BV1aa411a7aa/", platform: "bilibili", arg: "BV1aa411a7aa", waitMs: 1000, expect: "error", expectedErrors: ["NO_STATE", "WALL"] },
   { name: "douyin", url: process.env.DOUYIN_URL || "https://www.douyin.com/video/7519882634554543379", platform: "douyin", waitMs: 6000, expect: "parse" },
   { name: "douyin-deleted", url: "https://www.iesdouyin.com/share/video/6883418578486349070/", platform: "douyin", waitMs: 6000, expect: "error", expectedErrors: ["VIDEO_NOT_FOUND"] },
-  { name: "wechat", url: "https://mp.weixin.qq.com/s/jKFtBtP5MXB95GBBFrpF4w", platform: "wechat", waitMs: 3000, expect: "parse" },
-  { name: "toutiao", url: "https://www.toutiao.com/article/7127948627590349344/", platform: "toutiao", waitMs: 4000, expect: "parse" },
+  { name: "wechat", url: "https://mp.weixin.qq.com/s/jKFtBtP5MXB95GBBFrpF4w", platform: "wechat", waitMs: 3000, expect: "parse", expectAuthor: true },
+  { name: "toutiao", url: "https://www.toutiao.com/article/7127948627590349344/", platform: "toutiao", waitMs: 4000, expect: "parse", expectAuthor: true },
   { name: "zhihu", url: "https://www.zhihu.com/question/14300164636/answer/1896645253802475779", platform: "zhihu", waitMs: 4000, expect: "parse" },
-  { name: "zhihu-not-found", url: "https://www.zhihu.com/question/99999999999", platform: "zhihu", waitMs: 4000, expect: "error", expectedErrors: ["NO_ANSWER", "NO_CONTENT", "WALL"] },
+  { name: "zhihu-not-found", url: "https://www.zhihu.com/question/99999999999", platform: "zhihu", waitMs: 4000, expect: "error", expectedErrors: ["NO_ANSWER", "NO_CONTENT"] },
   { name: "generic", url: "https://en.wikipedia.org/wiki/Large_language_model", platform: "generic", waitMs: 2000, expect: "parse" },
 ];
 
-// 反爬/风控页特征（命中则判 BLOCKED，与"提取器 bug"区分）
-const BLOCK_RE = /安全验证|访问过于频繁|您当前请求存在异常|扫码登录|滑动验证|请登录后查看/i;
-
-function classify(c, r, pageText) {
-  if (pageText && BLOCK_RE.test(pageText.slice(0, 800))) return "BLOCKED";
+// 严格分类（根治假绿）：
+//   PASS           — 正向：无 error 且 title 非空（头条/公众号另断言 author 非空）；
+//                    反向：返回预期中的具体 error 码（守卫正确触发）
+//   BLOCKED        — 仅限导航失败/超时/目标站连接级错误（环境限制，警告不 fail）
+//   EXTRACTOR_FAIL — 其余一切：提取器抛异常、正向拿到 error/空 title、
+//                    反向拿不到结果或 error 码不在预期集合（拿不到结果绝不 PASS）
+function classify(c, r) {
   if (c.expect === "parse") {
-    if (r && !r.error && r.title) return "PASS";
-    if (r && (r.error === "WALL" || r.error === "NO_STATE")) return "BLOCKED"; // 平台拦截/未渲染，视为环境
+    if (r && !r.error && r.title) {
+      if (c.expectAuthor && !(r.author && r.author.name)) return "EXTRACTOR_FAIL";
+      return "PASS";
+    }
     return "EXTRACTOR_FAIL";
   }
-  // expect === "error"
   if (r && r.error && c.expectedErrors.includes(r.error)) return "PASS";
-  if (r && r.error === "WALL") return "BLOCKED";
   return "EXTRACTOR_FAIL";
 }
 
@@ -53,7 +55,6 @@ async function main() {
 
   for (const c of CASES) {
     const rec = { url: c.url };
-    let status = "ERROR";
     try {
       const ctx = await browser.newContext({
         userAgent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
@@ -61,26 +62,48 @@ async function main() {
         viewport: { width: 1440, height: 900 },
       });
       const page = await ctx.newPage();
-      await page.goto(c.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      try {
+        await page.goto(c.url, { waitUntil: "domcontentloaded", timeout: 60000 });
+      } catch (e) {
+        // 导航失败/超时/连接级错误 = 环境阻塞，警告不 fail
+        rec.status = "BLOCKED";
+        rec.detail = "nav: " + String(e?.message || e).slice(0, 120);
+        results[c.name] = rec;
+        rows.push(`| ${c.name} | ${rec.status} | ${rec.detail} |`);
+        console.log(`${rec.status}  ${c.name}  ${rec.detail}`);
+        await ctx.close().catch(() => {});
+        continue;
+      }
       await page.waitForTimeout(c.waitMs);
-      const pageText = await page.evaluate(() => (document.body?.innerText || "").slice(0, 800));
-      const src = getExtractorSource(c.platform);
-      const expr = c.arg ? `(${src})("${c.arg}")` : `(${src})()`;
-      rec.result = await page.evaluate(expr);
-      status = classify(c, rec.result, pageText);
-      rec.detail = rec.result.error
-        ? `error=${rec.result.error}`
-        : `title="${(rec.result.title || "").slice(0, 50)}"`;
-      await ctx.close();
+      let r;
+      try {
+        const src = getExtractorSource(c.platform);
+        const expr = c.arg ? `(${src})("${c.arg}")` : `(${src})()`;
+        r = await page.evaluate(expr);
+      } catch (e) {
+        // 提取器自身抛异常 = 提取器 bug，fail
+        rec.status = "EXTRACTOR_FAIL";
+        rec.detail = "extractor threw: " + String(e?.message || e).slice(0, 120);
+        results[c.name] = rec;
+        rows.push(`| ${c.name} | ${rec.status} | ${rec.detail} |`);
+        console.log(`${rec.status}  ${c.name}  ${rec.detail}`);
+        await ctx.close().catch(() => {});
+        continue;
+      }
+      rec.result = r;
+      rec.status = classify(c, r);
+      rec.detail = r.error
+        ? `error=${r.error}`
+        : `title="${(r.title || "").slice(0, 50)}"`;
+      await ctx.close().catch(() => {});
     } catch (e) {
-      // 导航失败/网络错误（如 CI 出口访问某站点被墙）视为环境阻塞，不 fail
-      status = "BLOCKED";
-      rec.detail = "nav: " + String(e?.message || e).slice(0, 120);
+      // harness 自身异常按提取器失败计（避免假绿）
+      rec.status = "EXTRACTOR_FAIL";
+      rec.detail = "harness: " + String(e?.message || e).slice(0, 120);
     }
-    rec.status = status;
     results[c.name] = rec;
-    rows.push(`| ${c.name} | ${status} | ${rec.detail || ""} |`);
-    console.log(`${status}  ${c.name}  ${rec.detail || ""}`);
+    rows.push(`| ${c.name} | ${rec.status} | ${rec.detail || ""} |`);
+    console.log(`${rec.status}  ${c.name}  ${rec.detail || ""}`);
   }
   await browser.close();
 
@@ -97,8 +120,8 @@ async function main() {
     ``,
     `**通过 ${rows.length - nFail - nBlocked} / 阻塞(BLOCKED，环境限制) ${nBlocked} / 失败 ${nFail}**`,
     ``,
-    `BLOCKED = 平台风控/反爬/登录墙（GitHub 机房 IP 访问中文平台常见），不计为失败；`,
-    `EXTRACTOR_FAIL / ERROR = 提取器自身问题，会导致本 job 失败。`,
+    `BLOCKED = 导航失败/超时/目标站连接级错误（环境限制，如 CI 出口被墙），不计为失败；`,
+    `EXTRACTOR_FAIL = 提取器自身问题（抛异常、正向拿到 error/空 title、反向拿不到预期 error 码），会导致本 job 失败。`,
   ].join("\n");
 
   if (process.env.GITHUB_STEP_SUMMARY) {

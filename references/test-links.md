@@ -14,10 +14,10 @@
 | 平台 | 链接 | 预期字段 | 上次验证 |
 |---|---|---|---|
 | B站视频 | `https://www.bilibili.com/video/BV1GJ411x7h7/`（经典老视频） | title、author、publishTime、duration、stats、cover、tags | 2026-10-09（真实 Chrome 实测通过：完整 ParseResult） |
-| B站分P视频 | （待填） | parts 数组 ≥ 2 项 | — |
+| B站分P视频 | `https://www.bilibili.com/video/BV1ur4y1T72V/`（C4D 基础课，59 个分P） | parts 数组 ≥ 2 项 | 2026-10-09（真实 Chrome 实测通过：parts=59） |
 | 抖音视频 | `https://www.douyin.com/video/7519882634554543379`（2025-06 公开视频） | title、author、stats（点赞/评论/收藏/分享）、publishTime | 2026-10-09 |
 | 抖音已删除视频 | `https://www.iesdouyin.com/share/video/6883418578486349070/`（短链跳转后应返回 `error: "VIDEO_NOT_FOUND"`） | ErrorResult 形状 | 2026-10-09 |
-| 西瓜视频 | （待填） | title、author、cover、body | — |
+| 西瓜视频 | `https://m.ixigua.com/dx/7693121068026686629` | title、author、cover、body | 2026-10-09（真实 Chrome 实测：title/author/body 有值；m 站 cover 为空，提取器已知弱点） |
 
 ## 文章平台
 
@@ -26,7 +26,7 @@
 | 公众号文章 | `https://mp.weixin.qq.com/s/jKFtBtP5MXB95GBBFrpF4w` | title、author（公众号名）、publishTime、body、images | 2026-10-09 |
 | 头条文章 | `https://www.toutiao.com/article/7127948627590349344/`（创作者小助手官方账号） | title、author（作者名，非"关注"按钮）、publishTime、body（不含播放器噪声） | 2026-10-09 |
 | 知乎问答 | `https://www.zhihu.com/question/14300164636/answer/1896645253802475779` | title、author、stats（赞同/评论）、body（末尾无操作栏噪声） | 2026-10-09（本机被知乎反爬 403 拦截未实测——headless/headed 均如此，守卫由 fixture 覆盖；链接待可达网络复核） |
-| 知乎专栏 | （待填） | title、author、cover、images | — |
+| 知乎专栏 | `https://zhuanlan.zhihu.com/p/58805184`（王喆：Embedding 必读十篇论文） | title、author、cover、images | 2026-10-09（本机被知乎反爬 403 拦截未实测，链接待可达网络复核） |
 | 通用网页 | `https://en.wikipedia.org/wiki/Large_language_model` | title（OG）、description、cover | 2026-10-09 |
 
 ## 边界场景（可选）
@@ -35,8 +35,8 @@
 |---|---|---|
 | B站带分享参数 | 任意 `?share_source=…` 链接 | 自动清洗为干净 BV URL，不发生自动连播串数据 |
 | B站不存在的 BV | `https://www.bilibili.com/video/BV1aa411a7aa/` | 返回 ErrorResult `error: "NO_STATE"`（2026-10-09 真实 Chrome 实测通过；注意 `BV1xx411c7mD`/`BV17x411w7KC` 都是真实存在的视频，不能当异常用例） |
-| 过期/删除内容 | （待填） | 返回 ErrorResult，走 generic 兜底并诚实告知 |
-| 登录墙 | （待填） | 停止并提示用户先登录，不尝试绕过 |
+| 过期/删除内容 | `https://www.iesdouyin.com/share/video/6883418578486349070/`（已删除抖音视频） | 返回 ErrorResult `error: "VIDEO_NOT_FOUND"`（2026-10-09 实测通过） |
+| 登录墙 | `https://www.zhihu.com/question/14300164636`（知乎未登录访问弹登录遮罩，内容已 SSR） | 提取不受遮罩影响；守卫只认内容容器是否存在，不因登录文本判失败（本机反爬未实测，待可达网络复核） |
 
 ## 验证记录
 
@@ -45,3 +45,4 @@
 | 2026-10-07 | 首次建立清单（文档/健壮性优化批次） | 待首次验证 | 链接待补充 |
 | 2026-10-09 | 修复批次：抖音 stats 限定信息区取数 + VIDEO_NOT_FOUND 守卫、头条 author 优先取用户链接文本；回填全部实测链接；新增 test-harness 自动化回归 | 6 平台全部通过（B站/知乎本机 WAF/反爬拦截，fixture 离线验证通过） | 详见 TEST-REPORT.md 与 `test-harness/` |
 | 2026-10-09 | 补测批次 2：bilibili/zhihu 提取器加错误守卫（WALL/NO_STATE/NO_ANSWER/NO_CONTENT）；playwright-core + 系统 Chrome 真实补测；新增 CI 定时回归 | B站正常/异常用例真实 Chrome 实测通过；知乎本机反爬 403 未实测（headless+headed 均拦），守卫由 fixture 覆盖；fixtures 30 断言全绿 | 更正批次 1 "B站 WAF 封 IP"结论（实为拦截非浏览器客户端）；详见 TEST-REPORT.md 补测批次 2 |
+| 2026-10-09 | 对抗性修复批次 3（DeepSeek 独立测试报告，5 缺陷全部核实）：B站守卫换序（先数据后文本，剔除"请登录"风控特征）、抖音 VIDEO_NOT_FOUND 多锚点门槛、头条 body 空防护+NO_CONTENT、公众号 DELETED/NO_CONTENT、通用 EMPTY、CI 假绿根治 | 5 缺陷全部修复；fixtures 37 断言全绿；B站/抖音/头条真实 Chrome 复跑通过（知乎仍 403 BLOCKED）；剩余占位符全部回填 | 详见 TEST-REPORT.md 批次 3 |

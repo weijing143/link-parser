@@ -30,11 +30,20 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
 () => {
   const text = document.body.innerText;
 
-  // 0. 前置守卫：视频不存在 / 页面未渲染视频信息时直接返回 ErrorResult，
-  //    避免拿页脚备案号等噪声当数据
+  // 0. 前置守卫：多锚点证据门槛判定"视频不存在"——
+  //    明确不存在文本 → VIDEO_NOT_FOUND；
+  //    或（标题为默认站名/空 + 无 h1 + 无 <video> + 无作者锚点）→ VIDEO_NOT_FOUND；
+  //    其余继续提取（未水合页由 SKILL.md 的等待/重试逻辑处理，不在此误杀）
+  const titleText = document.title.replace(/ - 抖音$/, "");
   const h1El = document.querySelector('h1');
-  if (/你要观看的视频不存在|视频不存在/.test(text)
-    || (!h1El && /^在抖音记录美好生活/.test(document.title.replace(/ - 抖音$/, "")))) {
+  const hasVideoEl = !!document.querySelector('video');
+  const hasAuthorAnchor = Array.from(document.querySelectorAll('img[alt]')).some(img => {
+    const alt = img.alt?.trim();
+    return alt && alt.length > 1 && !/^(icon|图片|logo)$/i.test(alt);
+  });
+  const goneText = /你要观看的视频不存在|视频不存在/.test(text);
+  const defaultTitle = titleText === "" || /^在抖音记录美好生活/.test(titleText);
+  if (goneText || (defaultTitle && !h1El && !hasVideoEl && !hasAuthorAnchor)) {
     return {
       platform: 'douyin',
       url: location.href,
@@ -196,7 +205,7 @@ await browser_evaluate({ function: "() => !!document.querySelector('video')" });
 
 - **选择器策略**：抖音前端**经常移除/重命名 `data-e2e` 属性**，class 名也用 CSS Modules 混淆过。本提取器用 `innerText` 正则 + `h1`/`img[alt]` 等稳定锚点，不依赖易变的属性选择器。如果仍提取失败，回退到 generic OG meta 兜底。
 - **统计数字提取的脆弱性**：只在"视频信息区"（`发布时间` 之前的文本）内取数，页脚备案号等噪声天然排除。方案 A 匹配四个连续纯数字行；方案 B 按行逐字段取数——点赞数取"抢首评/评论"按钮前相邻的纯数字行，评论数取"N 条评论"内嵌数字。如果抖音改版把统计数字打散、加了图标，或改用"1.2万"缩写显示，可能只拿到部分字段或顺序错乱，取不到的字段留空（undefined），但不会塞无关数字。评论/收藏/分享为 0 时抖音前端不渲染数字（只显示"抢首评/收藏/分享"），这些字段留空属正常。
-- **视频不存在的前置守卫**：视频删除/失效时页面显示"你要观看的视频不存在"（h1 缺失、标题为站点默认标题），提取器入口直接返回 `error: "VIDEO_NOT_FOUND"` 的 ErrorResult，不再继续提取。
+- **视频不存在的前置守卫（多锚点证据门槛）**：明确文本"你要观看的视频不存在"直接判 `VIDEO_NOT_FOUND`；否则要求"标题为默认站名或空 + 无 h1 + 无 `<video>` + 无作者锚点（img[alt]）"多重证据同时成立才判 `VIDEO_NOT_FOUND`——避免误杀未水合的有效页，也堵住空 title 无锚点的空壳漏检。其余情况继续提取，未水合页交给 SKILL.md 的等待/重试逻辑。
 - **视频流地址**：抖音的 `<video>.src` 是 `blob:https://...`，不能直接下载。真实 mp4 地址藏在 `RENDER_DATA`（URI 编码的 JSON）或动态接口里，且接口需要 `_signature` 参数。在已登录浏览器里 `RENDER_DATA` 有时能直接拿到 `play_addr.url_list[0]`，但经常被加密。本 skill 在拿不到时返回空 `media` 数组，并在 `extra.note` 里说明原因。
 - **iesdouyin.com 分享页**结构更老更稳定，如果遇到 `www.iesdouyin.com/share/video/`，DOM 更简单（`.video-info`、`.author` 等），但用户量少。
 - **登录墙**：如果 navigate 后 URL 含 `/login` 或页面显示"扫码登录"，按 SKILL.md 的 "When to stop and ask" 处理。注意：抖音视频页**未登录也能看内容**，但评论区会显示"请先登录后发表评论"--这不影响提取，提取的是视频本身的数据。

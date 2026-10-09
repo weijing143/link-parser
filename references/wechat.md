@@ -30,6 +30,27 @@ await browser_evaluate({ function: "() => window.scrollTo(0, 0)" });
 
 ```js
 () => {
+  // 前置守卫：内容删除/违规 -> DELETED；无正文容器 -> NO_CONTENT
+  const pageText = document.body?.innerText || "";
+  if (/该内容已被发布者删除|此内容因违规无法查看/.test(pageText)) {
+    return {
+      platform: "wechat",
+      url: location.href,
+      error: "DELETED",
+      message: "内容已被发布者删除或因违规无法查看。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+  if (!document.getElementById("js_content")) {
+    return {
+      platform: "wechat",
+      url: location.href,
+      error: "NO_CONTENT",
+      message: "未找到正文容器 #js_content，可能是临时链接过期或页面结构改版。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   // 标题 - 注意：#js_name 是公众号名称，不是文章标题！
   // 文章标题在 #activity-name 或 og:title 里
   const title =
@@ -120,6 +141,7 @@ await browser_evaluate({ function: "() => window.scrollTo(0, 0)" });
 
 ## 注意点
 
+- **前置守卫（ErrorResult）**：页面文本命中"该内容已被发布者删除/此内容因违规无法查看"返回 `error: "DELETED"`；无 `#js_content` 返回 `error: "NO_CONTENT"`（常见于临时链接过期），让 SKILL.md 走 generic 兜底。
 - **`#js_name` 是公众号名，不是文章标题**：早期版本的提取器误把 `#js_name` 当 title，导致返回的 `title` 是公众号名（如"新智元"）而非文章标题。正确做法：title 用 `#activity-name` 或 `og:title`，`#js_name` 只用于 author 字段。
 - **图片 URL 过滤**：页面里某些 `<img>` 的 `src`/`data-src` 可能被设成文章 URL（`mp.weixin.qq.com/s/...`）或 base64 占位图，需过滤掉，否则 `images` 数组会混入非图片 URL。
 - **DOM 稳定性**：公众号文章页用 `#js_*` ID 命名，多年来非常稳定，是各平台里最可靠的。

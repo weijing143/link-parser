@@ -27,7 +27,7 @@ await browser_wait_for({ time: 3 });
     || document.querySelector("article .title")?.textContent?.trim()
     || document.title;
 
-  const text = document.body.innerText;
+  const text = document.body?.innerText || "";
 
   // 作者 - 优先取作者主页链接的文本（最可靠）；innerText 正则和 class 选择器兜底
   // 注意：innerText 正则不能直接用——页面"作者"标签旁紧跟"关注"按钮，
@@ -59,6 +59,17 @@ await browser_wait_for({ time: 3 });
     || document.querySelector(".article-content")
     || document.querySelector(".content")
     || document.querySelector("article:not(.xgplayer)");
+
+  // 前置守卫：正文容器不存在 -> NO_CONTENT（页面结构变化/内容不存在）
+  if (!bodyEl) {
+    return {
+      platform: "toutiao",
+      url: location.href,
+      error: "NO_CONTENT",
+      message: "未找到正文容器（.syl-article-base 等），可能是文章不存在、已删除或页面改版。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
 
   // 正文提取：优先用 <p> 段落拼接（自动跳过视频播放器的 DOM 噪声）
   // 头条的 .syl-article-base 里同时包含播放器和文章段落
@@ -156,6 +167,7 @@ await browser_wait_for({ time: 3 });
 
 ## 注意点
 
+- **正文容器守卫**：文章提取器内 `document.body?.innerText`（body 可能为 null）与所有 DOM 访问均带防护；正文容器（`.syl-article-base` 等全部候选）不存在时返回 `error: "NO_CONTENT"` 的 ErrorResult，不再静默返回空壳。
 - **作者提取**：优先取 `a[href*='/user/']` 的文本作为作者名；`(?:记者|作者|编辑)\s+(\S{1,6})` innerText 正则仅作兜底，且需排除"关注/粉丝"等按钮词——真实页面"作者"标签旁紧跟"关注"按钮，正则会误捕。
 - **域名判断**：URL 含 `ixigua.com` 走视频提取器，含 `toutiao.com/article` 走文章提取器。如果含 `/video/` 也走视频提取器。
 - **移动版 vs PC 版**：移动版（`m.toutiao.com` / `m.ixigua.com`）DOM 更简单更稳定，如果 PC 版提取失败，可以尝试替换 URL 加 `m.` 前缀重试。

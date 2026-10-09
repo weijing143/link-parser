@@ -84,17 +84,17 @@
 
 ## 发现的问题清单（按严重程度排序）
 
-### #1 高 — 抖音 stats 提取失效，返回页脚许可证号
+### #1 高 — 抖音 stats 提取失效，返回页脚许可证号 **[已修复 2026-10-09 批次1]**
 - **位置**：`references/douyin.md` 提取器"4. 统计数字"段（方案 A 正则 `(\d+)\s*\n...举报` 与方案 B "举报"前 100 字符取数，约 54–69 行）
 - **现象**：当前抖音视频页面上方案 A 不匹配；方案 B 把页脚"（京）网药械网络信息服务备字（2023）第 00570 号 / 互联网新闻信息服务许可证 11220230001 / …"等备案号当成点赞/评论/收藏/分享返回。真实 4518 赞被报成 likes="00570"。**数据完全错误且无任何报错**，违反 SKILL.md "ErrorResult 一致错误形状"契约。
 - **建议**：提取后做合理性校验（如点赞数应出现在含"点赞/赞"语义的容器附近，或直接校验数字量级/来源区域），失败时返回带 `partial` 的 ErrorResult。
 
-### #2 高 — 抖音提取器无失败检测，"视频不存在"静默返回垃圾数据
+### #2 高 — 抖音提取器无失败检测，"视频不存在"静默返回垃圾数据 **[已修复 2026-10-09 批次1]**
 - **位置**：`references/douyin.md` 提取器整体（无错误分支）
 - **现象**：视频已删除时页面文案为"你要观看的视频不存在"，h1 缺失，但提取器仍返回 `title`=站点默认标题、`author.name`=封面图 alt（整段视频标题）、stats=页脚备案号。README/SKILL.md 声称失败会返回 ErrorResult，实际抖音提取器没有任何 ErrorResult 分支。
 - **建议**：检测"你要观看的视频不存在"/h1 缺失/方案 A、B 均失败时返回 `{platform:"douyin", error:"VIDEO_NOT_FOUND" 或 "NO_STATE", partial}`。
 
-### #3 中 — 头条 author 正则误捕"关注"按钮
+### #3 中 — 头条 author 正则误捕"关注"按钮 **[已修复 2026-10-09 批次1]**
 - **位置**：`references/toutiao.md` 文章提取器 author 段（约 33–38 行）
 - **现象**：`text.match(/(?:记者|作者|编辑)\s+(\S{1,6})/)` 在真实页面 innerText 中命中"作者\n\n关注"（"作者"标签 + 关注按钮），返回 `author.name="关注"`。诊断确认 `a[href*='/user/']` 的 textContent 即真实作者"熊猫贝贝小可爱"，但代码只取它的 href，从未用其文本兜底。
 - **建议**：排除捕获值为"关注/粉丝/举报"等按钮词；增加 `a[href*='/user/']` 文本作为 author 兜底。
@@ -165,3 +165,43 @@ node fixtures.mjs                     # bilibili/zhihu 离线 fixture 验证
 ## CI
 
 新增 `.github/workflows/regression.yml`：每周一 07:23 UTC 定时 + PR 触发，跑 test-links 全量链接（`ci-run.mjs`），job summary 输出逐项结果；某平台被拦（BLOCKED）计为警告不 fail，只有提取器自身失败（EXTRACTOR_FAIL）才 fail。
+
+---
+
+# 批次 3（2026-10-09）：对抗性验证修复（DeepSeek 独立测试报告）
+
+外部对抗性测试报告 5 个缺陷，逐条核实全部属实，本批次全部修复。
+
+## 缺陷与修法
+
+### D1 🔴 B站 WALL 守卫顺序错误（references/bilibili.md）
+**现象**：入口先扫页面文本 `/安全验证|访问过于频繁|请登录/` → WALL，再查 `!vd.bvid` → NO_STATE。正常视频页（未登录）评论区有"请登录后发表评论" → **守卫误杀合法页**。
+**修法**：换序——先 `vd = __INITIAL_STATE__?.videoData`，`vd.bvid` 存在即合法页直接提取（页面任何"请登录"文本都是正常内容）；无数据时页面文本只匹配 `/安全验证|访问过于频繁/`（"请登录"太宽泛已剔除）→ WALL；其余 → NO_STATE。AUTO_PLAY_SWITCHED 保持在数据分支内未动。
+**验证**：fixture 精确锁死（带完整合法 videoData + "请登录后发表评论"文本 → 必须返回正常 ParseResult 无 error）；真实 Chrome 复跑 BV1GJ411x7h7（未登录，含登录提示评论框）→ 完整 ParseResult 不误杀 ✅。
+
+### D2 🔴 抖音 VIDEO_NOT_FOUND 守卫太脆（references/douyin.md）
+**现象**：原守卫 `/视频不存在/ || (!h1 && 默认标题)`——未水合的有效页（h1 尚未渲染）会被误杀；已删除但 title 空串时漏过返回空壳。
+**修法**：多锚点证据门槛。收集 h1、document.title（去" - 抖音"）、`<video>`、img[alt] 作者锚点、统计区文本：明确"你要观看的视频不存在"文本 → VIDEO_NOT_FOUND；或"（title 为默认站名**或空**）+ 无 h1 + 无 video + 无作者锚点"同时成立 → VIDEO_NOT_FOUND；其余继续提取（未水合页交 SKILL.md 等待/重试）。
+**验证**：fixtures 新增未水合页（有 h1/video/作者锚点 → 不触发）与空 title 无锚点（→ VIDEO_NOT_FOUND）；真实链接复跑有效视频正常提取、已删除视频仍正确返回 VIDEO_NOT_FOUND ✅。
+
+### D3 🟠 头条抛异常（references/toutiao.md）
+**现象**：`document.body.innerText` 裸访问，body 为 null 时抛 TypeError；正文容器不存在时静默返回空壳。
+**修法**：`document.body?.innerText || ""`；全文裸 DOM 访问检查并加防护；正文容器（全部候选）不存在 → 返回 `error: "NO_CONTENT"` ErrorResult。
+**验证**：fixture（无文章容器页面 → NO_CONTENT 且不抛异常）✅；真实链接复跑正常 ✅。
+
+### D4 🟠 公众号/通用缺 ErrorResult（references/wechat.md、generic.md）
+**现象**：公众号文章被删除/违规页、临时链接过期页，提取器返回全空字段空壳；通用提取器对空页面同样返回空壳，均违反 SKILL.md ErrorResult 契约。
+**修法**：公众号入口守卫——页面文本命中"该内容已被发布者删除/此内容因违规无法查看" → `error: "DELETED"`；无 `#js_content` → `error: "NO_CONTENT"`。通用提取器 title 与 body 同时为空 → `error: "EMPTY"`（best-effort 语义不变，有 OG 就返回）。
+**验证**：fixtures 新增删除页 → DELETED、空页面 → EMPTY ✅。
+
+### D5 🟡 CI 假绿根治（test-harness/ci-run.mjs）
+**现象**：① 提取器抛异常被归入 BLOCKED（环境）不 fail；② 反向用例只要返回 error 就算 PASS，且页面被风控时"正常/异常用例同返回值却被分别判 BLOCKED/PASS"恒真；③ 正常用例不校验核心字段。
+**修法**：提取器抛异常 → EXTRACTOR_FAIL（唯一 fail 来源）；BLOCKED 仅限导航失败/超时/连接级错误；反向用例断言**具体 error 码**（守卫正确触发才 PASS，拿不到结果绝不 PASS）；正常用例断言无 error 且 title 非空（头条/公众号另断言 author 非空）。
+**验证**：本地冒烟运行 ci-run.mjs 分类行为正确（导航超时 → BLOCKED；守卫命中 → PASS）。
+
+## 验证汇总
+
+- `node fixtures.mjs`：**37 条断言全绿**（批次 2 的 30 条 + 本批次 7 条）。
+- 真实 Chrome 复跑：B站正常（守卫换序后未误杀）✅、B站不存在 → NO_STATE ✅、抖音有效视频正常提取 ✅、抖音已删除 → VIDEO_NOT_FOUND ✅、头条 author/title/publishTime ✅。
+- 知乎：本机仍被 403 反爬拦截（headless+headed 均如此），保持 BLOCKED 结论，守卫由 fixture 覆盖，未绕过。
+- test-links.md：全部 `（待填）` 占位符已回填（B站分P BV1ur4y1T72V 实测 59 分P；西瓜 m.ixigua 链接实测，cover 缺失为已知弱点；知乎专栏 zhuanlan.zhihu.com/p/58805184 待可达网络复核；删除内容/登录墙场景均已填）。

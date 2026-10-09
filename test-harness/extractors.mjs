@@ -36,8 +36,12 @@ export function getExtractor(platform, variant) {
       return loadFn(extractorBlock(codeBlocks("douyin.md")));
     case "wechat":
       return loadFn(extractorBlock(codeBlocks("wechat.md")));
-    case "toutiao":
-      return loadFn(extractorBlock(codeBlocks("toutiao.md"))); // 文章提取器
+    case "toutiao": {
+      // 两个提取器：头条文章 / 西瓜视频
+      const fns = codeBlocks("toutiao.md").filter(b => /extractedAt/.test(b));
+      const idx = { article: 0, xigua: 1 }[variant || "article"] ?? 0;
+      return loadFn(fns[idx]);
+    }
     case "zhihu": {
       // 三个提取器：问答页 / 专栏文章 / 想法
       const fns = codeBlocks("zhihu.md").filter(b => /extractedAt/.test(b));

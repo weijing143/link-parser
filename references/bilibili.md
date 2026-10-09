@@ -34,19 +34,22 @@ const result = await browser_evaluate({ function: "<提取器函数>" });
   const s = window.__INITIAL_STATE__ || {};
   const vd = s.videoData || {};
 
-  // 前置守卫：风控页/安全验证 -> WALL；videoData 缺失 -> NO_STATE
-  // （兑现下方"注意点"的文档承诺，保持 SKILL.md 的 ErrorResult 形状）
-  const bodyText = document.body?.innerText || "";
-  if (/安全验证|访问过于频繁|请登录/.test(bodyText)) {
-    return {
-      platform: "bilibili",
-      url: location.href,
-      error: "WALL",
-      message: "页面出现安全验证/访问频繁/登录要求，可能被风控。请在已登录浏览器中重试。",
-      extractedAt: new Date().toISOString(),
-    };
-  }
+  // 前置守卫（顺序很重要）：
+  // 1) 有 videoData.bvid 即合法页——直接正常提取。评论区"请登录后发表评论"等
+  //    登录提示是正常内容，绝不能作为风控依据，否则会误杀合法页。
+  // 2) 无 videoData 且页面文本命中风控特征 -> WALL。
+  // 3) 其余 -> NO_STATE（风控页/视频删除/改版兜底，交 SKILL.md 走 generic）。
   if (!vd.bvid) {
+    const bodyText = document.body?.innerText || "";
+    if (/安全验证|访问过于频繁/.test(bodyText)) {
+      return {
+        platform: "bilibili",
+        url: location.href,
+        error: "WALL",
+        message: "页面出现安全验证/访问过于频繁，可能被风控。请在已登录浏览器中重试。",
+        extractedAt: new Date().toISOString(),
+      };
+    }
     return {
       platform: "bilibili",
       url: location.href,
@@ -156,7 +159,7 @@ await browser_evaluate({
   
   目标 BV 号的提取方式：从用户给的 URL 里匹配 `/video/(BV[a-zA-Z0-9]+)/`。如果是 `b23.tv` 短链，先 navigate 拿到最终 URL 再提取 BV 号。
 
-- `__INITIAL_STATE__` 可能因页面改版而字段缺失，提取器入口已做前置守卫：`vd.bvid` 为空返回 `{ platform: "bilibili", url, error: "NO_STATE" }`，页面文本命中"安全验证/访问过于频繁/请登录"返回 `{ error: "WALL" }`，然后让 SKILL.md 走 generic 兜底。
+- `__INITIAL_STATE__` 可能因页面改版而字段缺失，提取器入口已做前置守卫（**先数据后文本，顺序不能换**）：有 `videoData.bvid` 即合法页直接提取——评论区"请登录后发表评论"等登录提示是正常内容，不作为风控依据；无 `videoData` 且页面文本命中"安全验证/访问过于频繁"返回 `{ error: "WALL" }`（"请登录"太宽泛已从风控特征中剔除）；其余返回 `{ error: "NO_STATE" }`，然后让 SKILL.md 走 generic 兜底。
 - **视频流 URL**：`<video>` 的 `src` 通常是 blob URL（`blob:https://...`），不能直接下载。要拿真实 mp4/dash 流需要调 `api.bilibili.com/x/player/playurl`，但这个接口需要正确的参数和 cookie。本 skill 只在 `videoSrc.startsWith("http")` 时返回流地址，blob 不返回，避免给用户假地址。
 - **番剧页**（`/bangumi/play/`）结构不同，`__INITIAL_STATE__.epInfo` 而非 `videoData`。如果你看到 URL 含 `/bangumi/`，可改读 `s.epInfo.mediaInfo`。简单起见：番剧页走 generic OG meta 兜底也可接受。
 - **专栏页**（`/read/cv`）：是纯文章，读 `#article-content` 的 textContent，type 设为 `"article"`。

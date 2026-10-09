@@ -56,7 +56,7 @@ node fixtures.mjs                     # 离线 fixture 断言（含 bug 回归�
 
 `.github/workflows/regression.yml`：每周一 07:23 UTC 定时 + PR 触发，用 Playwright 官方 Chromium 跑 `test-links.md` 全量链接（`ci-run.mjs`），逐项结果输出到 job summary（GitHub Actions → 该 job 的 Summary 页）。
 
-结果分三档：**PASS**（提取正确）/ **BLOCKED**（平台风控、反爬、登录墙或网络不通——GitHub 机房 IP 访问中文平台常见，计为警告不 fail）/ **EXTRACTOR_FAIL**（提取器自身问题，只有这档会让 job 变红）。
+结果分三档：**PASS**（正向：无 error 且核心字段齐全；反向：守卫返回预期 error 码）/ **BLOCKED**（仅限导航失败/超时/目标站连接级错误——环境限制，计为警告不 fail）/ **EXTRACTOR_FAIL**（提取器抛异常、正向拿到 error 或空 title、反向拿不到预期 error 码——只有这档会让 job 变红）。
 
 ## 安装
 
