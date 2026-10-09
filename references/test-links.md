@@ -13,20 +13,21 @@
 
 | 平台 | 链接 | 预期字段 | 上次验证 |
 |---|---|---|---|
-| B站视频 | （待填，例：`bilibili.com/video/BV…`） | title、author、publishTime、duration、stats、cover、tags | — |
+| B站视频 | `https://www.bilibili.com/video/BV1GJ411x7h7/`（经典老视频） | title、author、publishTime、duration、stats、cover、tags | 2026-10-09（本机被 WAF 拦截未实测，链接待可达网络复核） |
 | B站分P视频 | （待填） | parts 数组 ≥ 2 项 | — |
-| 抖音视频 | （待填，可用 `v.douyin.com` 短链测跳转） | title、author、stats（点赞/评论/收藏/分享）、publishTime | — |
+| 抖音视频 | `https://www.douyin.com/video/7519882634554543379`（2025-06 公开视频） | title、author、stats（点赞/评论/收藏/分享）、publishTime | 2026-10-09 |
+| 抖音已删除视频 | `https://www.iesdouyin.com/share/video/6883418578486349070/`（短链跳转后应返回 `error: "VIDEO_NOT_FOUND"`） | ErrorResult 形状 | 2026-10-09 |
 | 西瓜视频 | （待填） | title、author、cover、body | — |
 
 ## 文章平台
 
 | 平台 | 链接 | 预期字段 | 上次验证 |
 |---|---|---|---|
-| 公众号文章 | （待填，`mp.weixin.qq.com/s/…`） | title、author（公众号名）、publishTime、body、images | — |
-| 头条文章 | （待填） | title、publishTime、body（不含播放器噪声） | — |
-| 知乎问答 | （待填，`/question/…/answer/…`） | title、author、stats（赞同/评论）、body（末尾无操作栏噪声） | — |
-| 知乎专栏 | （待填，`zhuanlan.zhihu.com/p/…`） | title、author、cover、images | — |
-| 通用网页 | （待填，任意外文博客/新闻页） | title（OG）、description、cover | — |
+| 公众号文章 | `https://mp.weixin.qq.com/s/jKFtBtP5MXB95GBBFrpF4w` | title、author（公众号名）、publishTime、body、images | 2026-10-09 |
+| 头条文章 | `https://www.toutiao.com/article/7127948627590349344/`（创作者小助手官方账号） | title、author（作者名，非"关注"按钮）、publishTime、body（不含播放器噪声） | 2026-10-09 |
+| 知乎问答 | `https://www.zhihu.com/question/14300164636/answer/1896645253802475779` | title、author、stats（赞同/评论）、body（末尾无操作栏噪声） | 2026-10-09（本机被反爬 403 未实测，链接待可达网络复核） |
+| 知乎专栏 | （待填） | title、author、cover、images | — |
+| 通用网页 | `https://en.wikipedia.org/wiki/Large_language_model` | title（OG）、description、cover | 2026-10-09 |
 
 ## 边界场景（可选）
 
@@ -41,3 +42,4 @@
 | 日期 | 修改内容 | 结果 | 备注 |
 |---|---|---|---|
 | 2026-10-07 | 首次建立清单（文档/健壮性优化批次） | 待首次验证 | 链接待补充 |
+| 2026-10-09 | 修复批次：抖音 stats 限定信息区取数 + VIDEO_NOT_FOUND 守卫、头条 author 优先取用户链接文本；回填全部实测链接；新增 test-harness 自动化回归 | 6 平台全部通过（B站/知乎本机 WAF/反爬拦截，fixture 离线验证通过） | 详见 TEST-REPORT.md 与 `test-harness/` |
