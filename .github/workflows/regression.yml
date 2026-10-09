@@ -1,0 +1,41 @@
+name: extractor-regression
+
+on:
+  schedule:
+    # 每周一 07:23 UTC（避开整点/半点），平台结构漂移的早期发现
+    - cron: '23 7 * * 1'
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  regression:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install test-harness dependencies
+        working-directory: test-harness
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        working-directory: test-harness
+        run: npx playwright install chromium
+
+      - name: Run extractor regression (test-links 全量)
+        working-directory: test-harness
+        run: node ci-run.mjs
+
+      - name: Upload raw results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-run-results
+          path: test-harness/results/ci-run.json
+          if-no-files-found: ignore

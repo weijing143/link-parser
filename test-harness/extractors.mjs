@@ -26,7 +26,7 @@ function loadFn(src) {
   return new Function(`return (${src});`)();
 }
 
-export function getExtractor(platform) {
+export function getExtractor(platform, variant) {
   switch (platform) {
     case "bilibili": {
       const src = codeBlocks("bilibili.md").find(b => b.startsWith("(targetBvid)"));
@@ -38,8 +38,12 @@ export function getExtractor(platform) {
       return loadFn(extractorBlock(codeBlocks("wechat.md")));
     case "toutiao":
       return loadFn(extractorBlock(codeBlocks("toutiao.md"))); // 文章提取器
-    case "zhihu":
-      return loadFn(extractorBlock(codeBlocks("zhihu.md"))); // 问答页提取器
+    case "zhihu": {
+      // 三个提取器：问答页 / 专栏文章 / 想法
+      const fns = codeBlocks("zhihu.md").filter(b => /extractedAt/.test(b));
+      const idx = { answer: 0, article: 1, pin: 2 }[variant || "answer"] ?? 0;
+      return loadFn(fns[idx]);
+    }
     case "generic":
       return loadFn(extractorBlock(codeBlocks("generic.md")));
     default:
@@ -48,7 +52,7 @@ export function getExtractor(platform) {
 }
 
 // Extractors as source strings, for Playwright page.evaluate(fn) serialization.
-export function getExtractorSource(platform) {
-  const fn = getExtractor(platform);
+export function getExtractorSource(platform, variant) {
+  const fn = getExtractor(platform, variant);
   return fn.toString();
 }

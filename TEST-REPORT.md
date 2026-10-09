@@ -132,3 +132,36 @@ node fixtures.mjs                     # bilibili/zhihu 离线 fixture 验证
 - B站、知乎的**真实页面**未能实测（WAF/反爬按 skill 规定未做绕过），其判定基于 fixture 逻辑验证 + 受控页面行为，置信度低于其他 4 个平台。
 - `references/test-links.md` 的链接占位符 `（待填）` 本次可由本报告的样本链接回填（B站除外，需换一条未被 WAF 环境可达的链接验证）。
 - 视频截帧/录屏（video-frames.md / video-record.md）不在本次测试范围。
+
+---
+
+# 补测批次 2（2026-10-09）：真实浏览器验证 + 提取器错误守卫
+
+## 重要更正
+
+批次 1 中"B站 WAF 封 IP"的结论被推翻：B站只是拦截无 cookie/无 JS 的非浏览器客户端。使用 **playwright-core + 本机系统 Chrome**（`channel: 'chrome'`，临时 profile）后，B站页面可正常打开并返回完整数据。
+
+## 新增守卫（已合入提取器）
+
+- **bilibili.md 视频提取器**：入口前置守卫——页面文本命中"安全验证/访问过于频繁/请登录"返回 `error: "WALL"`；`__INITIAL_STATE__.videoData.bvid` 缺失返回 `error: "NO_STATE"`。兑现了 bilibili.md 注意点原有的文档承诺，ErrorResult 形状符合 SKILL.md 契约。
+- **zhihu.md 三个提取器**：问答页 `.AnswerItem`/`.Post-RichTextContainer` 均不存在 → `error: "NO_ANSWER"`；专栏 `.Post-RichText` 不存在且 `window.initialData` 为空 → `error: "NO_CONTENT"`；想法正文为空 → `error: "NO_CONTENT"`。守卫只认"内容容器真的不存在"——知乎登录遮罩弹出时内容已 SSR，不因登录文本判失败（zhihu.md 既有约定）。
+
+## 真实浏览器验证结果（`node real-browser.mjs`，playwright-core + 系统 Chrome）
+
+| 用例 | 结果 | 说明 |
+|---|---|---|
+| B站正常 `BV1GJ411x7h7` | ✅ PASS | 完整 ParseResult：title="【官方 MV】Never Gonna Give You Up - Rick As…"、author=索尼音乐中国；守卫无误报 |
+| B站不存在 `BV1aa411a7aa` | ✅ PASS | 正确返回 `error: "NO_STATE"` |
+| 知乎正常问答 | ⚠️ BLOCKED | 本机 IP 被知乎反爬拦截（40362"您当前请求存在异常"），**headless 与 headed 均被拦**，未绕过 |
+| 知乎不存在 question | ⚠️ BLOCKED | 同上 |
+
+- 用例修正记录：`BV1xx411c7mD` 与著名的 `BV17x411w7KC` 实测都是**真实存在的视频**（后者是保加利亚妖王合辑），不能当异常用例；`BV1aa411a7a7a`→已验证 `BV1aa411a7aa`/`BV1zz411z7zz` 等返回 NO_STATE。
+- 知乎降级结论：真实页面未能验证（IP 级反爬），守卫正确性由 fixtures.mjs 离线断言覆盖（NO_ANSWER/NO_CONTENT 均断言 error 字段与 ErrorResult 形状）；建议在可达网络复核 test-links.md 中的知乎链接。
+
+## fixtures 回归
+
+`node fixtures.mjs` 现有 **30 条断言全部通过**，新增：bilibili WALL、NO_STATE、正常页不误报；知乎 NO_ANSWER（含 ErrorResult 形状）、专栏 NO_CONTENT、专栏有 initialData 不报错、想法 NO_CONTENT。
+
+## CI
+
+新增 `.github/workflows/regression.yml`：每周一 07:23 UTC 定时 + PR 触发，跑 test-links 全量链接（`ci-run.mjs`），job summary 输出逐项结果；某平台被拦（BLOCKED）计为警告不 fail，只有提取器自身失败（EXTRACTOR_FAIL）才 fail。

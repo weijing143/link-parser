@@ -130,9 +130,15 @@ const toutiaoHtml = `<!DOCTYPE html><html><head><title>首次"官宣" - 今日�
 async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await (await browser.newContext()).newPage();
+  // setContent() reuses the same Window (document.open/write), so globals like
+  // window.__INITIAL_STATE__ leak between fixtures — force a real navigation first.
+  const load = async (html) => {
+    await page.goto("about:blank");
+    await page.setContent(html, { waitUntil: "load" });
+  };
 
   // Bilibili: matching BV
-  await page.setContent(biliHtml, { waitUntil: "load" });
+  await load(biliHtml, { waitUntil: "load" });
   const biliSrc = getExtractorSource("bilibili");
   results.bilibili_fixture_match = await page.evaluate(`(${biliSrc})("BV1TEST00000001")`);
   check("bilibili: title", results.bilibili_fixture_match.title === "测试视频标题 Fixture Video", results.bilibili_fixture_match.title);
@@ -146,7 +152,7 @@ async function main() {
   check("bilibili: AUTO_PLAY_SWITCHED", results.bilibili_fixture_mismatch.error === "AUTO_PLAY_SWITCHED", JSON.stringify(results.bilibili_fixture_mismatch));
 
   // Zhihu: answer page fixture
-  await page.setContent(zhihuHtml, { waitUntil: "load" });
+  await load(zhihuHtml, { waitUntil: "load" });
   const zhihuSrc = getExtractorSource("zhihu");
   results.zhihu_fixture = await page.evaluate(`(${zhihuSrc})()`);
   check("zhihu: title", results.zhihu_fixture.title === "如何评价测试驱动的开发？", results.zhihu_fixture.title);
@@ -154,7 +160,7 @@ async function main() {
   check("zhihu: body cleaned (no 赞同/分享 tail)", !/赞同|条评论|分享/.test(results.zhihu_fixture.body || ""), results.zhihu_fixture.body);
 
   // Douyin: valid video -> stats from info region only, footer numbers excluded
-  await page.setContent(douyinValidHtml, { waitUntil: "load" });
+  await load(douyinValidHtml, { waitUntil: "load" });
   const douyinSrc = getExtractorSource("douyin");
   results.douyin_fixture_valid = await page.evaluate(`(${douyinSrc})()`);
   const dv = results.douyin_fixture_valid;
@@ -166,14 +172,14 @@ async function main() {
   check("douyin: publishTime", dv.publishTime === "2025-06-25 21:45", dv.publishTime);
 
   // Douyin: deleted video -> VIDEO_NOT_FOUND ErrorResult
-  await page.setContent(douyinDeletedHtml, { waitUntil: "load" });
+  await load(douyinDeletedHtml, { waitUntil: "load" });
   results.douyin_fixture_deleted = await page.evaluate(`(${douyinSrc})()`);
   const dd = results.douyin_fixture_deleted;
   check("douyin: VIDEO_NOT_FOUND", dd.error === "VIDEO_NOT_FOUND", JSON.stringify(dd));
   check("douyin: ErrorResult has platform/url/extractedAt", dd.platform === "douyin" && !!dd.url && !!dd.extractedAt, JSON.stringify(dd));
 
   // Toutiao: author from a[href*='/user/'], not the "关注" button
-  await page.setContent(toutiaoHtml, { waitUntil: "load" });
+  await load(toutiaoHtml, { waitUntil: "load" });
   const toutiaoSrc = getExtractorSource("toutiao");
   results.toutiao_fixture = await page.evaluate(`(${toutiaoSrc})()`);
   const tt = results.toutiao_fixture;
@@ -181,6 +187,44 @@ async function main() {
   check("toutiao: author is not 关注", tt.author?.name !== "关注", JSON.stringify(tt.author));
   check("toutiao: publishTime", tt.publishTime === "2022-08-04 21:09", tt.publishTime);
   check("toutiao: body from article", /正文第一段/.test(tt.body || ""), tt.body);
+
+  // ---------- Guard fixtures (regression for NO_STATE/WALL/NO_ANSWER/NO_CONTENT) ----------
+  // Bilibili: risk-control wall page -> WALL (checked before NO_STATE)
+  await load(`<!DOCTYPE html><html><head><title>安全验证</title></head><body><p>请完成安全验证后继续访问</p></body></html>`, { waitUntil: "load" });
+  results.bilibili_fixture_wall = await page.evaluate(`(${biliSrc})("BV1TEST00000001")`);
+  check("bilibili: WALL", results.bilibili_fixture_wall.error === "WALL", JSON.stringify(results.bilibili_fixture_wall));
+  check("bilibili: WALL ErrorResult shape", results.bilibili_fixture_wall.platform === "bilibili" && !!results.bilibili_fixture_wall.url && !!results.bilibili_fixture_wall.extractedAt, JSON.stringify(results.bilibili_fixture_wall));
+
+  // Bilibili: error page without __INITIAL_STATE__ -> NO_STATE
+  await load(`<!DOCTYPE html><html><head><title>出错啦! - bilibili.com</title></head><body><p>出错啦!</p></body></html>`, { waitUntil: "load" });
+  results.bilibili_fixture_nostate = await page.evaluate(`(${biliSrc})("BV1TEST00000001")`);
+  check("bilibili: NO_STATE", results.bilibili_fixture_nostate.error === "NO_STATE", JSON.stringify(results.bilibili_fixture_nostate));
+
+  // Bilibili: normal page must NOT trigger WALL (logged-out header has 登录 button etc.)
+  check("bilibili: normal page no WALL/NO_STATE", !results.bilibili_fixture_match.error, JSON.stringify(results.bilibili_fixture_match.error));
+
+  // Zhihu answer: no answer container -> NO_ANSWER
+  const zhihuArticleSrc = getExtractorSource("zhihu", "article");
+  const zhihuPinSrc = getExtractorSource("zhihu", "pin");
+  await load(`<!DOCTYPE html><html><head><title>页面不存在 - 知乎</title></head><body><h1>你似乎来到了没有知识的荒原</h1><div class="Recommendations">推荐内容</div></body></html>`, { waitUntil: "load" });
+  results.zhihu_fixture_no_answer = await page.evaluate(`(${zhihuSrc})()`);
+  check("zhihu: NO_ANSWER", results.zhihu_fixture_no_answer.error === "NO_ANSWER", JSON.stringify(results.zhihu_fixture_no_answer));
+  check("zhihu: NO_ANSWER ErrorResult shape", results.zhihu_fixture_no_answer.platform === "zhihu" && !!results.zhihu_fixture_no_answer.url && !!results.zhihu_fixture_no_answer.extractedAt, JSON.stringify(results.zhihu_fixture_no_answer));
+
+  // Zhihu article: no .Post-RichText and no initialData -> NO_CONTENT
+  await load(`<!DOCTYPE html><html><head><title>404 - 知乎专栏</title></head><body><h1 class="Post-Title">不存在</h1></body></html>`, { waitUntil: "load" });
+  results.zhihu_fixture_no_content = await page.evaluate(`(${zhihuArticleSrc})()`);
+  check("zhihu: NO_CONTENT (article)", results.zhihu_fixture_no_content.error === "NO_CONTENT", JSON.stringify(results.zhihu_fixture_no_content));
+
+  // Zhihu article: no .Post-RichText but initialData present -> must NOT error
+  await load(`<!DOCTYPE html><html><head><title>专栏</title></head><body><h1 class="Post-Title">标题</h1><script>window.initialData = {initialState:{}};</script></body></html>`, { waitUntil: "load" });
+  results.zhihu_fixture_article_initialdata = await page.evaluate(`(${zhihuArticleSrc})()`);
+  check("zhihu: article with initialData does not error", !results.zhihu_fixture_article_initialdata.error, JSON.stringify(results.zhihu_fixture_article_initialdata.error));
+
+  // Zhihu pin: empty content -> NO_CONTENT
+  await load(`<!DOCTYPE html><html><head><title>想法 - 知乎</title></head><body><div class="PinItem"><div class="AuthorInfo"><a>某人</a></div></div></body></html>`, { waitUntil: "load" });
+  results.zhihu_fixture_pin_no_content = await page.evaluate(`(${zhihuPinSrc})()`);
+  check("zhihu: NO_CONTENT (pin)", results.zhihu_fixture_pin_no_content.error === "NO_CONTENT", JSON.stringify(results.zhihu_fixture_pin_no_content));
 
   await browser.close();
 

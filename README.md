@@ -49,7 +49,14 @@ node fixtures.mjs                     # 离线 fixture 断言（含 bug 回归�
 - `run-tests.mjs` 用真实页面跑 `references/` 里的提取器，结果写到 `results/*.json`；B站/知乎等被 WAF 拦截时可换 `BROWSER=chrome` 用本机 Chrome 复跑。
 - `fixtures.mjs` 不依赖外网，用构造 DOM 验证提取器逻辑（bilibili 字段映射 / 知乎统计清洗 / 抖音 stats 与 VIDEO_NOT_FOUND / 头条 author），任一条断言失败会以非零码退出。
 - 抖音无稳定公开深链，`run-tests.mjs` 默认从首页推荐流发现链接，也可用 `DOUYIN_URL=https://www.douyin.com/video/xxx` 指定。
+- B站/知乎补测用 `node real-browser.mjs`（playwright-core + 本机系统 Chrome，临时 profile，不下载浏览器；headless 被拦时用 `HEADED=1` 试有头模式）。
 - 实测属于"解析单条公开页面"，请勿用于批量采集。
+
+### CI 自动回归
+
+`.github/workflows/regression.yml`：每周一 07:23 UTC 定时 + PR 触发，用 Playwright 官方 Chromium 跑 `test-links.md` 全量链接（`ci-run.mjs`），逐项结果输出到 job summary（GitHub Actions → 该 job 的 Summary 页）。
+
+结果分三档：**PASS**（提取正确）/ **BLOCKED**（平台风控、反爬、登录墙或网络不通——GitHub 机房 IP 访问中文平台常见，计为警告不 fail）/ **EXTRACTOR_FAIL**（提取器自身问题，只有这档会让 job 变红）。
 
 ## 安装
 

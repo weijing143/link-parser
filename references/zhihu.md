@@ -32,6 +32,18 @@ await browser_wait_for({ time: 3 });
     || document.querySelector(".Post-RichTextContainer")
     || document.querySelector("[class*='RichText']");
 
+  // 前置守卫：答案容器不存在 -> NO_ANSWER
+  // （知乎登录遮罩弹出时内容已 SSR，此处只认"内容容器真的不存在"，不认登录文本）
+  if (!document.querySelector(".AnswerItem") && !document.querySelector(".Post-RichTextContainer")) {
+    return {
+      platform: "zhihu",
+      url: location.href,
+      error: "NO_ANSWER",
+      message: "未找到答案内容容器（.AnswerItem/.Post-RichTextContainer），可能是问题不存在、已删除或页面改版。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   const answerAuthor =
     document.querySelector(".AuthorInfo-name")?.textContent?.trim()
     || document.querySelector("[class*='AuthorInfo'] a")?.textContent?.trim();
@@ -118,6 +130,17 @@ await browser_wait_for({ time: 3 });
   const bodyEl =
     document.querySelector(".Post-RichText")
     || document.querySelector(".RichText");
+
+  // 前置守卫：正文容器不存在且 initialData 也无 -> NO_CONTENT
+  if (!bodyEl && !window.initialData) {
+    return {
+      platform: "zhihu",
+      url: location.href,
+      error: "NO_CONTENT",
+      message: "未找到专栏正文容器（.Post-RichText），window.initialData 也为空，可能是文章不存在、已删除或页面改版。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
   const rawBodyRaw = bodyEl?.innerText?.trim() || "";
   const rawBody = rawBodyRaw.replace(/[\u200b\u200c\u200d\uFEFF]/g, "").trim();
   const bodyHtml = bodyEl?.innerHTML || "";
@@ -183,6 +206,17 @@ await browser_wait_for({ time: 3 });
   const publishTime =
     document.querySelector("[class*='time']")?.textContent?.trim();
 
+  // 前置守卫：想法正文为空 -> NO_CONTENT
+  if (!content) {
+    return {
+      platform: "zhihu",
+      url: location.href,
+      error: "NO_CONTENT",
+      message: "未提取到想法正文，可能是内容不存在、已删除或页面改版。",
+      extractedAt: new Date().toISOString(),
+    };
+  }
+
   return {
     platform: "zhihu",
     url: location.href,
@@ -201,6 +235,7 @@ await browser_wait_for({ time: 3 });
 - **统计提取策略**：知乎的 class 名经常用 CSS Modules 混淆（如 `VoteButton--up`、`ContentItem-time` 等），DOM 选择器不稳定。本提取器改为**从 `innerText` 末尾正则提取**统计数字，模式固定为 `赞同 \d+\n\d+ 条评论\n\d+\n\d+\n分享`，不依赖 DOM 选择器。同时**正文自动清洗**，去掉末尾操作栏噪声，用户看到的 body 是纯净内容。
 - **问题页多条答案**：`/question/{qid}` 不带 `/answer/` 时是问题页，含多条答案。本 skill 默认只提取第一条（通常是最高赞同答案）。如果用户想看所有答案，提取器返回的 body 是第一条，需在卡片里注明"该页含 N 条答案，默认取首条"。
 - **登录墙**：知乎频繁弹"扫码登录"遮罩，但内容其实已 SSR 加载。如果检测到登录遮罩，可以尝试用 JS 删除遮罩元素继续读，或直接读 `initialData` / 已加载 DOM。**不要**尝试绕过登录去看付费内容。
+- **前置守卫（ErrorResult）**：问答页 `.AnswerItem`/`.Post-RichTextContainer` 都不存在时返回 `error: "NO_ANSWER"`；专栏 `.Post-RichText` 不存在且 `window.initialData` 也为空时返回 `error: "NO_CONTENT"`；想法正文为空返回 `error: "NO_CONTENT"`。守卫只认"内容容器真的不存在"——知乎弹登录遮罩时内容通常已 SSR 加载，**不要**因检测到登录相关文本就判失败。
 - **`window.initialData`**：知乎把页面初始数据塞在 `window.initialData`，包含问题、答案列表、作者信息等。如果 DOM 提取失败，可以尝试从 `initialData` 解析：
   ```js
   const d = window.initialData || {};
